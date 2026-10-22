@@ -2,6 +2,10 @@
 //! outside via `strace`. Skipped (not failed) when `strace` isn't on
 //! `PATH`, since whether it runs unprivileged in CI is not
 //! guaranteed.
+//!
+//! Linux only: the syscall names checked here are Linux syscalls, and the
+//! `strace` shipped with Git for Windows is a different tool.
+#![cfg(target_os = "linux")]
 
 use std::process::Command;
 
