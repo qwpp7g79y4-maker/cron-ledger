@@ -59,7 +59,8 @@ pub fn parse_duration(text: &str) -> Result<Duration, String> {
         if !secs.is_finite() {
             return Err(format!("'{text}' is not a finite time span"));
         }
-        return Ok(Duration::from_secs_f64(secs.max(0.0)));
+        return Duration::try_from_secs_f64(secs.max(0.0))
+            .map_err(|_| format!("'{text}' is out of range for a time span"));
     }
 
     let mut total_secs = 0.0_f64;
@@ -100,7 +101,8 @@ pub fn parse_duration(text: &str) -> Result<Duration, String> {
     if !total_secs.is_finite() {
         return Err(format!("'{text}' is not a finite time span"));
     }
-    Ok(Duration::from_secs_f64(total_secs.max(0.0)))
+    Duration::try_from_secs_f64(total_secs.max(0.0))
+        .map_err(|_| format!("'{text}' is out of range for a time span"))
 }
 
 fn unit_seconds(unit: &str) -> Option<f64> {
@@ -202,7 +204,8 @@ pub fn parse_timer_unit(content: &str, file: &str) -> TimerUnit {
 /// widened by this timer's `RandomizedDelaySec=` and `AccuracySec=`
 /// (tolerance + RandomizedDelaySec + AccuracySec).
 pub fn effective_tolerance(base: Duration, timer: &TimerUnit) -> Duration {
-    base + timer.randomized_delay + timer.accuracy
+    base.saturating_add(timer.randomized_delay)
+        .saturating_add(timer.accuracy)
 }
 
 /// Outcome of one expected run that fell before the machine booted.
@@ -374,6 +377,35 @@ OnUnitActiveSec=1h
         assert_eq!(unit.randomized_delay, Duration::ZERO);
         assert_eq!(unit.warnings.len(), 1);
         assert!(unit.warnings[0].contains("RandomizedDelaySec"));
+    }
+
+    #[test]
+    fn duration_parsing_rejects_a_finite_value_too_big_for_duration() {
+        // `1e300` is finite, but far beyond `Duration`'s range; the old
+        // `Duration::from_secs_f64` call panicked on it instead of
+        // returning an error like any other bad duration.
+        assert!(parse_duration("1e300").is_err());
+        assert!(parse_duration("99999999999999999999years").is_err());
+    }
+
+    #[test]
+    fn randomized_delay_sec_huge_value_is_a_warning_not_a_panic() {
+        let content = "[Timer]\nRandomizedDelaySec=1e300\n";
+        let unit = parse_timer_unit(content, "f");
+        assert_eq!(unit.randomized_delay, Duration::ZERO);
+        assert_eq!(unit.warnings.len(), 1);
+        assert!(unit.warnings[0].contains("RandomizedDelaySec"));
+    }
+
+    #[test]
+    fn effective_tolerance_saturates_instead_of_overflowing() {
+        let unit = TimerUnit {
+            randomized_delay: Duration::MAX,
+            accuracy: Duration::MAX,
+            ..TimerUnit::default()
+        };
+        let tol = effective_tolerance(Duration::from_secs(300), &unit);
+        assert_eq!(tol, Duration::MAX);
     }
 
     #[test]

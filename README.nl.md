@@ -149,7 +149,7 @@ cargo fmt --check
 cargo package
 ```
 
-Alle vier draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audit` en `cargo deny check`.
+De eerste drie draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audit` en `cargo deny check`. Draai `cargo package` zelf voor een release; CI doet dit niet.
 
 ## Steunen
 

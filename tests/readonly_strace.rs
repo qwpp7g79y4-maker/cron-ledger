@@ -29,6 +29,8 @@ fn strace_sees_no_network_calls_and_no_write_capable_openat() {
         std::env::temp_dir().join(format!("cron-ledger-strace-{}.log", std::process::id()));
 
     let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let crontab_fixture = fixtures.join("crontab/system.crontab");
+    let syslog_fixture = fixtures.join("logs/debian-syslog.log");
     let status = Command::new("strace")
         .args(["-f", "-e", "trace=network,openat", "-o"])
         .arg(&log_path)
@@ -36,9 +38,9 @@ fn strace_sees_no_network_calls_and_no_write_capable_openat() {
         .arg("--system-root")
         .arg(&fixtures)
         .arg("--crontab")
-        .arg(fixtures.join("crontab/system.crontab"))
+        .arg(&crontab_fixture)
         .arg("--syslog")
-        .arg(fixtures.join("logs/debian-syslog.log"))
+        .arg(&syslog_fixture)
         .arg("--since")
         .arg("2020-01-01T00:00:00Z")
         .arg("--until")
@@ -46,10 +48,14 @@ fn strace_sees_no_network_calls_and_no_write_capable_openat() {
         .stdout(std::process::Stdio::null())
         .status()
         .expect("failed to launch strace");
-    // `strace` exits with the traced program's own exit status (0-3 here,
-    // per the report's exit codes), not strace's own success; only the
-    // trace log's contents are under test.
-    let _ = status;
+    // `strace` exits with the traced program's own exit status. Only 0, 1
+    // and 3 are the report's own documented completed-audit codes; a usage
+    // error (2) or a crash means the trace below never got near a fixture.
+    assert!(
+        matches!(status.code(), Some(0) | Some(1) | Some(3)),
+        "expected the traced audit to complete (exit 0, 1 or 3), got {:?}",
+        status.code()
+    );
 
     let log = std::fs::read_to_string(&log_path).unwrap_or_else(|e| {
         panic!(
@@ -58,6 +64,20 @@ fn strace_sees_no_network_calls_and_no_write_capable_openat() {
         )
     });
     std::fs::remove_file(&log_path).ok();
+
+    // A completed-audit exit code alone doesn't prove the trace actually
+    // covers the audit: confirm it contains a successful read of each
+    // fixture named on the command line.
+    for fixture in [&crontab_fixture, &syslog_fixture] {
+        let fixture = fixture.to_str().expect("fixture path is not UTF-8");
+        let read = log.lines().any(|line| {
+            line.contains("openat(") && line.contains(fixture) && !line.contains("= -1")
+        });
+        assert!(
+            read,
+            "trace never shows a successful read of {fixture}:\n{log}"
+        );
+    }
 
     let mut offenders = Vec::new();
     for line in log.lines() {

@@ -111,7 +111,15 @@ impl Collector {
                 (JobSchedule::Standard(expected), describe_schedule(s))
             }
         };
-        self.descriptions.insert(key.clone(), description);
+        self.descriptions
+            .entry(key.clone())
+            .and_modify(|existing| {
+                if *existing != description {
+                    existing.push_str(", ");
+                    existing.push_str(&description);
+                }
+            })
+            .or_insert(description);
         self.jobs.push(ScheduledJob {
             key,
             file: job.file.clone(),
@@ -148,6 +156,32 @@ fn derive_service_unit(path: &InputPath) -> String {
         }
         InputPath::Stdin => "stdin.service".to_string(),
     }
+}
+
+/// Whether `/etc/cron.d` would run this file. Debian cron accepts only
+/// names made of letters, digits, `_` and `-`; cronie additionally skips
+/// backup/package-manager leftovers such as `*.rpmsave` or `*~`. Both
+/// skip dotfiles. A file that fails this check is never run, so treating
+/// its jobs as expected would produce a false `MISSED`.
+fn cron_d_accepts_file_name(name: &str) -> bool {
+    if name.starts_with('.') {
+        return false;
+    }
+    const REJECTED_SUFFIXES: &[&str] = &[
+        "~",
+        ".dpkg-old",
+        ".dpkg-dist",
+        ".dpkg-new",
+        ".dpkg-tmp",
+        ".rpmsave",
+        ".rpmorig",
+        ".rpmnew",
+    ];
+    if REJECTED_SUFFIXES.iter().any(|suf| name.ends_with(suf)) {
+        return false;
+    }
+    name.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 fn walk_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -219,6 +253,13 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         let mut files = Vec::new();
         walk_files_sorted(&cron_d, &mut files);
         for file in files {
+            let accepted = file
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(cron_d_accepts_file_name);
+            if !accepted {
+                continue;
+            }
             match std::fs::read_to_string(&file) {
                 Ok(content) => {
                     let label = file.display().to_string();
@@ -511,6 +552,97 @@ mod tests {
                     command: "/usr/local/bin/other.sh".to_string(),
                 },
             ]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn etc_cron_d_scan_skips_files_cron_ignores() {
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-cron-d-filter-{}",
+            std::process::id()
+        ));
+        let etc_cron_d = dir.join("etc/cron.d");
+        std::fs::create_dir_all(&etc_cron_d).unwrap();
+        std::fs::write(
+            etc_cron_d.join("myjob"),
+            "0 4 * * * root /usr/local/bin/kept.sh\n",
+        )
+        .unwrap();
+        std::fs::write(
+            etc_cron_d.join(".hidden"),
+            "0 4 * * * root /usr/local/bin/dotfile.sh\n",
+        )
+        .unwrap();
+        std::fs::write(
+            etc_cron_d.join("myjob~"),
+            "0 4 * * * root /usr/local/bin/backup-tilde.sh\n",
+        )
+        .unwrap();
+        std::fs::write(
+            etc_cron_d.join("myjob.dpkg-old"),
+            "0 4 * * * root /usr/local/bin/dpkg-old.sh\n",
+        )
+        .unwrap();
+        std::fs::write(
+            etc_cron_d.join("myjob.rpmsave"),
+            "0 4 * * * root /usr/local/bin/rpmsave.sh\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            system_root: dir.clone(),
+            ..Cli::default()
+        };
+
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let keys: Vec<JobKey> = audit.ledger.entries.iter().map(|e| e.key.clone()).collect();
+        assert_eq!(
+            keys,
+            vec![JobKey::Cron {
+                user: "root".to_string(),
+                command: "/usr/local/bin/kept.sh".to_string(),
+            }]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn two_schedules_for_the_same_job_key_both_keep_their_description() {
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-shared-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(
+            &crontab_path,
+            "0 3 * * * root backup.sh\n0 15 * * * root backup.sh\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            ..Cli::default()
+        };
+
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        assert_eq!(audit.ledger.entries.len(), 2);
+        let key = JobKey::Cron {
+            user: "root".to_string(),
+            command: "backup.sh".to_string(),
+        };
+        let description = audit.descriptions.get(&key).unwrap();
+        assert!(
+            description.contains("0 3"),
+            "description {description:?} lost the first schedule"
+        );
+        assert!(
+            description.contains("0 15"),
+            "description {description:?} lost the second schedule"
         );
         std::fs::remove_dir_all(&dir).ok();
     }
