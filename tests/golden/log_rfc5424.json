@@ -1,0 +1,29 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-10-20T01:00:01.5Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 1234,
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "rfc5424.log",
+      "line": 1
+    },
+    {
+      "timestamp": "2026-10-20T01:00:05Z",
+      "source": {
+        "CronCmdEnd": {
+          "user": "root",
+          "pid": 1234,
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "rfc5424.log",
+      "line": 2
+    }
+  ],
+  "warnings": []
+}

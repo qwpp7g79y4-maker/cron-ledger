@@ -1,0 +1,217 @@
+{
+  "jobs": [
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": {
+            "Values": [
+              1
+            ]
+          },
+          "month": {
+            "Values": [
+              1
+            ]
+          },
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo yearly",
+      "stdin": null,
+      "file": "specials.crontab",
+      "line": 1
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": {
+            "Values": [
+              1
+            ]
+          },
+          "month": {
+            "Values": [
+              1
+            ]
+          },
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo annually",
+      "stdin": null,
+      "file": "specials.crontab",
+      "line": 2
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": {
+            "Values": [
+              1
+            ]
+          },
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo monthly",
+      "stdin": null,
+      "file": "specials.crontab",
+      "line": 3
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": {
+            "Values": [
+              0
+            ]
+          }
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo weekly",
+      "stdin": null,
+      "file": "specials.crontab",
+      "line": 4
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo daily",
+      "stdin": null,
+      "file": "specials.crontab",
+      "line": 5
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo midnight",
+      "stdin": null,
+      "file": "specials.crontab",
+      "line": 6
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": "Star",
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo hourly",
+      "stdin": null,
+      "file": "specials.crontab",
+      "line": 7
+    },
+    {
+      "schedule": "Reboot",
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo reboot",
+      "stdin": null,
+      "file": "specials.crontab",
+      "line": 8
+    }
+  ],
+  "warnings": []
+}

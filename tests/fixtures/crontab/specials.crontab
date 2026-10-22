@@ -1,0 +1,8 @@
+@yearly echo yearly
+@annually echo annually
+@monthly echo monthly
+@weekly echo weekly
+@daily echo daily
+@midnight echo midnight
+@hourly echo hourly
+@reboot echo reboot

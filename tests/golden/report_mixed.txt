@@ -1,0 +1,22 @@
+root: /usr/local/bin/backup.sh (crontab:3) [0 3 * * *]
+  verwacht: 11, gevonden: 2, missed: 7, late: 1
+  laatste run: 2026-10-21T03:12:00+00:00[UTC] (LATE)
+  eerste gemiste tijden: 2026-10-22T03:00:00+00:00[UTC], 2026-10-23T03:00:00+00:00[UTC], 2026-10-24T03:00:00+00:00[UTC], 2026-10-25T03:00:00+00:00[UTC], 2026-10-26T03:00:00+00:00[UTC]
+
+backup.service (backup.timer:0) [OnCalendar=*-*-* 03:00:00]
+  verwacht: 1, gevonden: 1, missed: 0, late: 0
+  laatste run: 2026-10-20T03:00:10+00:00[UTC] (OK)
+  gemiste tijden: -
+
+root: /usr/local/bin/on-boot.sh (crontab:9) [@reboot]
+  status: REBOOT_ONLY
+  boots gevonden: 2 (2026-10-20T06:00:00+00:00[UTC], 2026-10-25T06:00:00+00:00[UTC])
+
+flaky.service (flaky.timer:0) [unsupported: OnBootSec]
+  status: UNSUPPORTED_TRIGGER
+
+----
+Samenvatting: 2 OK, 1 LATE, 0 LATE (caught up), 7 MISSED, 2 NO_TRACE, 1 REBOOT_ONLY, 1 UNSUPPORTED_TRIGGER
+Logdekking: 2026-10-20T03:00:02+00:00[UTC] .. 2026-10-29T03:00:00+00:00[UTC]
+Venster: 2026-10-20T00:00:00+00:00[UTC] .. 2026-11-01T00:00:00+00:00[UTC] (tz UTC)
+Tolerantie: 300s

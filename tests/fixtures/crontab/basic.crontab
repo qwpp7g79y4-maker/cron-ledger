@@ -1,0 +1,11 @@
+# A per-user crontab exercising lists, ranges, steps, and names.
+* * * * * echo every-minute
+5 * * * * echo minute-5
+1,15,30,45 * * * * echo minute-list
+0 9-17 * * * echo business-hours
+*/15 * * * * echo every-15-minutes
+0 0-10/3 * * * echo range-with-step
+0 0 1 jan,MAR * echo month-names
+0 0 * * mon-fri echo weekday-range
+0 0 * * 7 echo sunday-as-seven
+0 0 * * 0 echo sunday-as-zero

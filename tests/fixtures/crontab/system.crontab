@@ -1,0 +1,8 @@
+# /etc/crontab-style file: has a user column and recognizes env lines.
+SHELL=/bin/sh
+PATH=/usr/bin:/bin
+MAILTO=root
+TZ=UTC
+0 3 * * * root /usr/local/bin/backup.sh
+CRON_TZ=America/New_York
+30 2 * * * alice /usr/local/bin/alice-job.sh

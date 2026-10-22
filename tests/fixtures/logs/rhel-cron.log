@@ -1,0 +1,3 @@
+Oct 20 03:00:01 db1 CROND[5551]: (root) CMD (/opt/scripts/nightly-report.sh)
+Oct 20 03:00:04 db1 CROND[5551]: (root) CMDOUT (report generated: 128 rows)
+Oct 20 03:00:05 db1 CROND[5551]: (root) CMDEND (/opt/scripts/nightly-report.sh)

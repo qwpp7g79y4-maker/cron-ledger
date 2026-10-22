@@ -1,0 +1,44 @@
+# License and source policy for cron-ledger.
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+all-features = false
+
+[advisories]
+unmaintained = "all"
+unsound = "all"
+yanked = "deny"
+ignore = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+deny = [
+    # cron-ledger is local and read-only; no network client belongs here.
+    { name = "reqwest" },
+    { name = "hyper" },
+    { name = "ureq" },
+    { name = "curl" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+]
+exceptions = []

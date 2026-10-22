@@ -1,0 +1,287 @@
+{
+  "jobs": [
+    {
+      "schedule": {
+        "Standard": {
+          "minute": "Star",
+          "hour": "Star",
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo every-minute",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 2
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              5
+            ]
+          },
+          "hour": "Star",
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo minute-5",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 3
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              1,
+              15,
+              30,
+              45
+            ]
+          },
+          "hour": "Star",
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo minute-list",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 4
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo business-hours",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 5
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0,
+              15,
+              30,
+              45
+            ]
+          },
+          "hour": "Star",
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo every-15-minutes",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 6
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0,
+              3,
+              6,
+              9
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo range-with-step",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 7
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": {
+            "Values": [
+              1
+            ]
+          },
+          "month": {
+            "Values": [
+              1,
+              3
+            ]
+          },
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo month-names",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 8
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": {
+            "Values": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          }
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo weekday-range",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 9
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": {
+            "Values": [
+              0
+            ]
+          }
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo sunday-as-seven",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 10
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              0
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": {
+            "Values": [
+              0
+            ]
+          }
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo sunday-as-zero",
+      "stdin": null,
+      "file": "basic.crontab",
+      "line": 11
+    }
+  ],
+  "warnings": []
+}

@@ -1,0 +1,2 @@
+0 6 * * * date +\%F
+0 7 * * * cat%line one%line two

@@ -1,0 +1,2 @@
+Oct 20 00:00:01 host CRON[1]: (root) CMD (/usr/local/bin/other.sh)
+Oct 21 23:59:00 host CRON[2]: (root) CMD (/usr/local/bin/other.sh)

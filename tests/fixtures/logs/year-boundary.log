@@ -1,0 +1,2 @@
+Dec 31 23:59:00 web1 CRON[1]: (root) CMD (/usr/local/bin/year-end.sh)
+Jan  1 00:01:00 web1 CRON[2]: (root) CMD (/usr/local/bin/new-year.sh)

@@ -1,0 +1,45 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-10-20T03:00:01Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 1,
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "garbage.log",
+      "line": 1
+    },
+    {
+      "timestamp": "2026-10-20T03:10:00Z",
+      "source": {
+        "CronCmd": {
+          "user": "alice",
+          "pid": 3,
+          "command": "echo hi"
+        }
+      },
+      "file": "garbage.log",
+      "line": 4
+    }
+  ],
+  "warnings": [
+    {
+      "file": "garbage.log",
+      "line": 2,
+      "message": "'this' is not a month name"
+    },
+    {
+      "file": "garbage.log",
+      "line": 3,
+      "message": "'CRON' line has no '(user) ACTION (arg)' body"
+    },
+    {
+      "file": "garbage.log",
+      "line": 5,
+      "message": "'NotAMonth' is not a month name"
+    }
+  ]
+}

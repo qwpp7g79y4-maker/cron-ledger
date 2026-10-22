@@ -1,0 +1,5 @@
+{"__REALTIME_TIMESTAMP":"1792454401000000","_BOOT_ID":"boot-aaa","SYSLOG_IDENTIFIER":"kernel","MESSAGE":"Linux version 6.1.0 booting"}
+{"__REALTIME_TIMESTAMP":"1792465200000000","_BOOT_ID":"boot-aaa","SYSLOG_IDENTIFIER":"CROND","_PID":"4321","MESSAGE":"(root) CMD (/usr/local/bin/backup.sh)"}
+{"__REALTIME_TIMESTAMP":"1792465200000000","_BOOT_ID":"boot-aaa","SYSLOG_IDENTIFIER":"cron","MESSAGE":[40,97,108,105,99,101,41,32,67,77,68,32,40,101,99,104,111,32,104,105,41]}
+{"__REALTIME_TIMESTAMP":"1792476000000000","_BOOT_ID":"boot-aaa","SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"nightly-report.service","MESSAGE":"Starting Nightly report..."}
+{"__REALTIME_TIMESTAMP":"1792476000000000","_BOOT_ID":"boot-aaa","SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"nightly-report.service","MESSAGE":"Started Nightly report."}

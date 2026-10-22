@@ -1,0 +1,5 @@
+[Unit]
+Description=Explicit trailing timezone, independent of the system tz
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Europe/Amsterdam

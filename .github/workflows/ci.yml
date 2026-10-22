@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, stable)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is Apple Silicon; macos-15-intel is x86_64.
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install strace
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y strace
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked --no-fail-fast
+      # Overflow checks differ between debug and release builds, and
+      # one_million_lines_parses_fast_in_release's time budget is only
+      # asserted in release.
+      - run: cargo test --locked --no-fail-fast --release
+
+  msrv:
+    name: Test (ubuntu-latest, Rust 1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.85
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked --no-fail-fast
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust stable
+        run: rustup update stable && rustup default stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: cargo audit
+        run: cargo audit
+
+  deny:
+    name: cargo deny check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust stable
+        run: rustup update stable && rustup default stable
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: cargo deny check
+        run: cargo deny check
+
+  readonly-static-check:
+    name: static Cargo.lock check for network crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: grep Cargo.lock for network crates
+        # Independent of (and simpler than) cargo-deny's own ban list in
+        # deny.toml: a plain, dependency-free static check that this
+        # read-only, offline tool never gains a network crate.
+        run: |
+          if grep -E '^name = "(reqwest|hyper|ureq|curl)"' Cargo.lock; then
+            echo "a network crate is present in Cargo.lock" >&2
+            exit 1
+          fi

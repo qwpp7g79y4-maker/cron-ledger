@@ -1,0 +1,6 @@
+* * * * * echo ok-before
+this is not a valid cron line at all
+60 * * * * echo bad-minute-value
+* * * * echo too-few-fields
+@notaspecial echo bad-special
+* * * * * echo ok-after

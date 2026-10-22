@@ -1,0 +1,5 @@
+[Unit]
+Description=Every quarter hour, shorthand time-only form
+
+[Timer]
+OnCalendar=*:0/15
