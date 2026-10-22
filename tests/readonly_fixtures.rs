@@ -2,6 +2,9 @@
 //! must change nothing in it — not a byte, not an mtime. The copy is
 //! `chmod a-w`'d (write bits cleared, nothing else touched) before the
 //! binary ever sees it.
+//!
+//! Unix only: the check relies on POSIX permission bits.
+#![cfg(unix)]
 
 use std::collections::BTreeMap;
 use std::fs;
