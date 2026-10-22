@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "since": "2026-10-20T00:00:00Z",
+  "until": "2026-11-01T00:00:00Z",
+  "tz": "UTC",
+  "tolerance_secs": 300,
+  "log_coverage": {
+    "first": null,
+    "last": null
+  },
+  "warnings": [
+    "no log events found in the window: every expected run is reported as NO_TRACE, never MISSED"
+  ],
+  "jobs": [
+    {
+      "key": {
+        "Cron": {
+          "user": "root",
+          "command": "/usr/local/bin/ghost.sh"
+        }
+      },
+      "file": "crontab",
+      "line": 1,
+      "schedule": "0 3 * * *",
+      "summary": {
+        "expected": 1,
+        "found": 0,
+        "missed": 0,
+        "late": 0
+      },
+      "outcome": {
+        "Standard": [
+          {
+            "expected": "2026-10-20T03:00:00Z",
+            "status": "NoTrace",
+            "actual": null,
+            "late_by": null,
+            "exit_status": "Unknown"
+          }
+        ]
+      }
+    }
+  ],
+  "exit_code": 3
+}

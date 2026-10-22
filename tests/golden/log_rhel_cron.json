@@ -1,0 +1,40 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-10-20T03:00:01Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 5551,
+          "command": "/opt/scripts/nightly-report.sh"
+        }
+      },
+      "file": "rhel-cron.log",
+      "line": 1
+    },
+    {
+      "timestamp": "2026-10-20T03:00:04Z",
+      "source": {
+        "CronCmdOut": {
+          "user": "root",
+          "pid": 5551
+        }
+      },
+      "file": "rhel-cron.log",
+      "line": 2
+    },
+    {
+      "timestamp": "2026-10-20T03:00:05Z",
+      "source": {
+        "CronCmdEnd": {
+          "user": "root",
+          "pid": 5551,
+          "command": "/opt/scripts/nightly-report.sh"
+        }
+      },
+      "file": "rhel-cron.log",
+      "line": 3
+    }
+  ],
+  "warnings": []
+}

@@ -1,0 +1,57 @@
+{
+  "jobs": [
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              6
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "date +%F",
+      "stdin": null,
+      "file": "percent.crontab",
+      "line": 1
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              7
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "cat",
+      "stdin": "line one\nline two",
+      "file": "percent.crontab",
+      "line": 2
+    }
+  ],
+  "warnings": []
+}

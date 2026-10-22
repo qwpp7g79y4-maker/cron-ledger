@@ -1,0 +1,10 @@
+root: /usr/local/bin/backup.sh (crontab:1) [0 3 * * *]
+  verwacht: 1, gevonden: 1, missed: 0, late: 0
+  laatste run: 2026-10-20T03:00:02+00:00[UTC] (OK)
+  gemiste tijden: -
+
+----
+Samenvatting: 1 OK, 0 LATE, 0 LATE (caught up), 0 MISSED, 0 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER
+Logdekking: 2026-10-20T03:00:02+00:00[UTC] .. 2026-10-20T03:00:02+00:00[UTC]
+Venster: 2026-10-20T00:00:00+00:00[UTC] .. 2026-11-01T00:00:00+00:00[UTC] (tz UTC)
+Tolerantie: 300s

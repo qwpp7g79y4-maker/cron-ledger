@@ -1,0 +1,29 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-12-31T23:59:00Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 1,
+          "command": "/usr/local/bin/year-end.sh"
+        }
+      },
+      "file": "year-boundary.log",
+      "line": 1
+    },
+    {
+      "timestamp": "2027-01-01T00:01:00Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 2,
+          "command": "/usr/local/bin/new-year.sh"
+        }
+      },
+      "file": "year-boundary.log",
+      "line": 2
+    }
+  ],
+  "warnings": []
+}

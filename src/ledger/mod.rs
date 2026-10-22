@@ -1,0 +1,12 @@
+//! Matching expected run times against log evidence, and the ledger of
+//! outcomes that falls out of it.
+
+mod build;
+mod job_key;
+mod matcher;
+mod status;
+
+pub use build::{build_ledger, JobLedgerEntry, JobOutcome, JobSchedule, Ledger, ScheduledJob};
+pub use job_key::{normalize_command, JobKey};
+pub use matcher::{match_runs, LogCoverage, RunOutcome};
+pub use status::Status;

@@ -1,0 +1,54 @@
+{
+  "entries": [
+    {
+      "key": {
+        "Cron": {
+          "user": "root",
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "crontab",
+      "line": 1,
+      "outcome": {
+        "Standard": [
+          {
+            "expected": "2026-10-20T03:00:00Z",
+            "status": "Ok",
+            "actual": "2026-10-20T03:00:02Z",
+            "late_by": null,
+            "exit_status": "Unknown"
+          }
+        ]
+      }
+    },
+    {
+      "key": {
+        "Cron": {
+          "user": "root",
+          "command": "/usr/local/bin/report.sh"
+        }
+      },
+      "file": "crontab",
+      "line": 2,
+      "outcome": {
+        "Standard": [
+          {
+            "expected": "2026-10-20T04:00:00Z",
+            "status": "Late",
+            "actual": "2026-10-20T04:12:00Z",
+            "late_by": {
+              "secs": 720,
+              "nanos": 0
+            },
+            "exit_status": "Unknown"
+          }
+        ]
+      }
+    }
+  ],
+  "log_coverage": {
+    "first": "2026-10-20T03:00:02Z",
+    "last": "2026-10-20T04:12:00Z"
+  },
+  "warnings": []
+}

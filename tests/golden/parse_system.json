@@ -1,0 +1,57 @@
+{
+  "jobs": [
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              0
+            ]
+          },
+          "hour": {
+            "Values": [
+              3
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": "UTC",
+      "cron_tz": null,
+      "user": "root",
+      "command": "/usr/local/bin/backup.sh",
+      "stdin": null,
+      "file": "system.crontab",
+      "line": 6
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": {
+            "Values": [
+              30
+            ]
+          },
+          "hour": {
+            "Values": [
+              2
+            ]
+          },
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": "UTC",
+      "cron_tz": "America/New_York",
+      "user": "alice",
+      "command": "/usr/local/bin/alice-job.sh",
+      "stdin": null,
+      "file": "system.crontab",
+      "line": 8
+    }
+  ],
+  "warnings": []
+}

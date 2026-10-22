@@ -1,0 +1,4 @@
+Oct 20 03:00:01 web1 CRON[1234]: (root) CMD (/usr/local/bin/backup.sh)
+Oct 20 03:05:12 web1 sshd[9981]: Accepted publickey for alice from 10.0.0.5 port 51515 ssh2
+Oct 21 03:00:02 web1 CRON[1301]: (root) CMD (/usr/local/bin/backup.sh)
+Oct 22 03:00:00 web1 CRON[1399]: (alice) CMD (date +\%F)

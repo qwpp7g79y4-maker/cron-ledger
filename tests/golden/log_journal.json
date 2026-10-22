@@ -1,0 +1,49 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-10-20T00:00:01Z",
+      "source": {
+        "Boot": {
+          "boot_id": "boot-aaa"
+        }
+      },
+      "file": "journal.jsonl",
+      "line": 1
+    },
+    {
+      "timestamp": "2026-10-20T03:00:00Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 4321,
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "journal.jsonl",
+      "line": 2
+    },
+    {
+      "timestamp": "2026-10-20T03:00:00Z",
+      "source": {
+        "CronCmd": {
+          "user": "alice",
+          "pid": null,
+          "command": "echo hi"
+        }
+      },
+      "file": "journal.jsonl",
+      "line": 3
+    },
+    {
+      "timestamp": "2026-10-20T06:00:00Z",
+      "source": {
+        "SystemdUnitStart": {
+          "unit": "nightly-report.service"
+        }
+      },
+      "file": "journal.jsonl",
+      "line": 5
+    }
+  ],
+  "warnings": []
+}

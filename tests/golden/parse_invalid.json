@@ -1,0 +1,62 @@
+{
+  "jobs": [
+    {
+      "schedule": {
+        "Standard": {
+          "minute": "Star",
+          "hour": "Star",
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo ok-before",
+      "stdin": null,
+      "file": "invalid.crontab",
+      "line": 1
+    },
+    {
+      "schedule": {
+        "Standard": {
+          "minute": "Star",
+          "hour": "Star",
+          "dom": "Star",
+          "month": "Star",
+          "dow": "Star"
+        }
+      },
+      "tz": null,
+      "cron_tz": null,
+      "user": "alice",
+      "command": "echo ok-after",
+      "stdin": null,
+      "file": "invalid.crontab",
+      "line": 6
+    }
+  ],
+  "warnings": [
+    {
+      "file": "invalid.crontab",
+      "line": 2,
+      "message": "minute: 'this' is not a number"
+    },
+    {
+      "file": "invalid.crontab",
+      "line": 3,
+      "message": "minute: '60' (60) is out of range 0-59"
+    },
+    {
+      "file": "invalid.crontab",
+      "line": 4,
+      "message": "day-of-week: 'echo' is not a recognized name"
+    },
+    {
+      "file": "invalid.crontab",
+      "line": 5,
+      "message": "unknown special string '@notaspecial'"
+    }
+  ]
+}

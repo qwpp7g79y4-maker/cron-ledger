@@ -1,0 +1,5 @@
+[Unit]
+Description=Nightly job, named alias form
+
+[Timer]
+OnCalendar=daily

@@ -1,0 +1,5 @@
+[Unit]
+Description=Monotonic trigger, not supported in v1
+
+[Timer]
+OnBootSec=5min

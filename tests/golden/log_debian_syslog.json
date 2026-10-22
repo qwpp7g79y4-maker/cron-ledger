@@ -1,0 +1,41 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-10-20T03:00:01Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 1234,
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "debian-syslog.log",
+      "line": 1
+    },
+    {
+      "timestamp": "2026-10-21T03:00:02Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 1301,
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "debian-syslog.log",
+      "line": 3
+    },
+    {
+      "timestamp": "2026-10-22T03:00:00Z",
+      "source": {
+        "CronCmd": {
+          "user": "alice",
+          "pid": 1399,
+          "command": "date +\\%F"
+        }
+      },
+      "file": "debian-syslog.log",
+      "line": 4
+    }
+  ],
+  "warnings": []
+}
