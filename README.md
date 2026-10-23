@@ -41,16 +41,22 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
 Everything below uses the fixtures under `tests/fixtures/` so every
 example is also exactly what the test suite runs. Except where a
 command is specifically demonstrating the `--system-root` default scan,
-the examples pin `--system-root /nonexistent` — a path that doesn't
-exist, so the scan silently finds nothing — to keep them from also
-picking up your own machine's real `/etc/crontab` and `/etc/cron.d/*`.
+the examples pin `--system-root /nonexistent`. An explicit `--crontab`,
+`--crontab-user`, or `--timer-unit` already turns that scan off, so the
+path is not read. It stays in the example so dropping the source flag
+cannot pick up your own machine's `/etc/crontab` and `/etc/cron.d/*`.
 
 ### System crontab (`--crontab`, and the `--system-root` default scan)
 
 Without any `--crontab`/`--crontab-user`/`--timer-unit` flags, cron-ledger
 scans `--system-root DIR` (default `/`) for `DIR/etc/crontab`,
 `DIR/etc/cron.d/*`, and `DIR/var/spool/cron/**` on its own — the same
-layout a real system uses:
+layout a real system uses. Passing `--system-root` points that scan at a
+snapshot instead of `/`, and the scan still runs. Passing one of those
+three flags selects exactly the files you named and does not also scan
+the system root. A second read of the same file would schedule the
+command twice, and one log line can satisfy only one of the copies, so
+the extra copy would be reported `MISSED`.
 
 ```sh
 cron-ledger --system-root /path/to/a/system/snapshot \
@@ -166,6 +172,7 @@ none of the numbers in this README are unmeasured benchmark badges.
 | Invalid crontab lines become a `file:line` warning, not a crash | `tests/crontab_golden.rs::invalid_crontab_matches_golden` (`tests/fixtures/crontab/invalid.crontab`) |
 | vixie-cron's day-of-month/day-of-week OR rule when both fields are restricted | `src/crontab/model.rs` `matches_day` unit tests |
 | `--system-root` default scan reads `etc/crontab`, `etc/cron.d/*`, and `var/spool/cron/**` | `src/app.rs::system_root_default_scan_reads_etc_crontab_cron_d_and_spool` |
+| An explicit `--crontab`, `--crontab-user`, or `--timer-unit` is the whole set of jobs. The `--system-root` scan does not also run, so a file under that root is not scheduled a second time. `--system-root` with none of those flags still scans that directory | `src/app.rs::explicit_crontab_is_not_counted_again_by_the_system_root_scan`, `src/app.rs::system_root_default_scan_reads_etc_crontab_cron_d_and_spool` |
 | `--crontab-user USER=PATH` reads one user's crontab explicitly | `src/app.rs::crontab_user_flag_reads_a_per_user_crontab_file`, `src/cli.rs::crontab_user_splits_on_equals` |
 | Timezone- and DST-aware schedule expansion (system tz, `--tz`, per-line `CRON_TZ=`), cronie-style spring-gap/fall-fold handling for Europe/Amsterdam and America/New_York, strictly increasing output | `src/schedule.rs` unit tests (`amsterdam_*`, `new_york_*`, `times_are_strictly_increasing_for_a_busy_schedule`, the `expand_is_always_sorted_and_in_range` property test) |
 | Reads systemd `.timer` units: `OnCalendar=` (`daily`, weekday ranges, `*:0/15`, explicit tz suffix), `Persistent=`, `RandomizedDelaySec=`, `AccuracySec=`, `Unit=`, cross-checked once by hand against `systemd-analyze calendar` | `tests/systemd_golden.rs` (`tests/fixtures/systemd/{daily,weekday-business,quarter-hour,tz-suffix}.timer`, `tests/fixtures/systemd/README.md`) |

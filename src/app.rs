@@ -5,11 +5,11 @@
 //!
 //! A source named explicitly on the command line (`--crontab`,
 //! `--timer-unit`, `--syslog`, ...) that cannot be read is a hard usage
-//! error (exit 2): the user asked for it by name. The default
-//! `--system-root` scan is best-effort: a missing path is silently
-//! skipped, and an unreadable one becomes a warning, since `/` is always
-//! scanned by default even where most of it does not exist or is not
-//! readable.
+//! error (exit 2): the user asked for it by name. The `--system-root`
+//! scan runs only when no `--crontab`, `--crontab-user`, or `--timer-unit`
+//! was given. It is best-effort: a missing path is silently skipped, and
+//! an unreadable one becomes a warning, because the default root is `/`
+//! and much of it may not exist or may not be readable.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -313,69 +313,78 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         c.add_parse_result(parsed, &tz, since, until, tolerance);
     }
 
-    // --system-root: a best-effort default scan, never a hard error.
-    let root = &cli.system_root;
-    let etc_crontab = root.join("etc/crontab");
-    if etc_crontab.is_file() {
-        match std::fs::read_to_string(&etc_crontab) {
-            Ok(content) => {
-                let label = etc_crontab.display().to_string();
-                let parsed = crontab::parse_system_crontab(&content, &label);
-                c.add_parse_result(parsed, &tz, since, until, tolerance);
-            }
-            Err(e) => c.warnings.push(format!("{}: {e}", etc_crontab.display())),
-        }
-    }
-
-    let cron_d = root.join("etc/cron.d");
-    if cron_d.is_dir() {
-        let mut files = Vec::new();
-        collect_files(&cron_d, false, &mut files);
-        for file in files {
-            let name = match file.file_name().and_then(|n| n.to_str()) {
-                Some(name) => name,
-                None => continue,
-            };
-            match classify_cron_d_file_name(name) {
-                CronDFileName::Ignored => continue,
-                CronDFileName::AmbiguousAcrossImplementations => {
-                    c.warnings.push(format!(
-                        "{}: Debian cron ignores this name; cronie may still run it, so it is \
-                         skipped here but could be an unaudited job",
-                        file.display()
-                    ));
-                    continue;
-                }
-                CronDFileName::Accepted => {}
-            }
-            match std::fs::read_to_string(&file) {
+    // --system-root is the fallback source. A named --crontab,
+    // --crontab-user, or --timer-unit is the whole set of jobs: also
+    // walking the root would schedule a file the user already named a
+    // second time. Naming --system-root by itself still scans that
+    // directory. A missing path stays silent; an unreadable file is a
+    // warning, never a hard error.
+    let named_job_source =
+        !cli.crontabs.is_empty() || !cli.crontab_users.is_empty() || !cli.timer_units.is_empty();
+    if !named_job_source {
+        let root = &cli.system_root;
+        let etc_crontab = root.join("etc/crontab");
+        if etc_crontab.is_file() {
+            match std::fs::read_to_string(&etc_crontab) {
                 Ok(content) => {
-                    let label = file.display().to_string();
+                    let label = etc_crontab.display().to_string();
                     let parsed = crontab::parse_system_crontab(&content, &label);
                     c.add_parse_result(parsed, &tz, since, until, tolerance);
                 }
-                Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
+                Err(e) => c.warnings.push(format!("{}: {e}", etc_crontab.display())),
             }
         }
-    }
 
-    let spool = root.join("var/spool/cron");
-    if spool.is_dir() {
-        let mut files = Vec::new();
-        collect_files(&spool, true, &mut files);
-        for file in files {
-            let user = file
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
-            match std::fs::read_to_string(&file) {
-                Ok(content) => {
-                    let label = file.display().to_string();
-                    let parsed = crontab::parse_user_crontab(&content, &label, Some(&user));
-                    c.add_parse_result(parsed, &tz, since, until, tolerance);
+        let cron_d = root.join("etc/cron.d");
+        if cron_d.is_dir() {
+            let mut files = Vec::new();
+            collect_files(&cron_d, false, &mut files);
+            for file in files {
+                let name = match file.file_name().and_then(|n| n.to_str()) {
+                    Some(name) => name,
+                    None => continue,
+                };
+                match classify_cron_d_file_name(name) {
+                    CronDFileName::Ignored => continue,
+                    CronDFileName::AmbiguousAcrossImplementations => {
+                        c.warnings.push(format!(
+                            "{}: Debian cron ignores this name; cronie may still run it, so it is \
+                         skipped here but could be an unaudited job",
+                            file.display()
+                        ));
+                        continue;
+                    }
+                    CronDFileName::Accepted => {}
                 }
-                Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
+                match std::fs::read_to_string(&file) {
+                    Ok(content) => {
+                        let label = file.display().to_string();
+                        let parsed = crontab::parse_system_crontab(&content, &label);
+                        c.add_parse_result(parsed, &tz, since, until, tolerance);
+                    }
+                    Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
+                }
+            }
+        }
+
+        let spool = root.join("var/spool/cron");
+        if spool.is_dir() {
+            let mut files = Vec::new();
+            collect_files(&spool, true, &mut files);
+            for file in files {
+                let user = file
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                match std::fs::read_to_string(&file) {
+                    Ok(content) => {
+                        let label = file.display().to_string();
+                        let parsed = crontab::parse_user_crontab(&content, &label, Some(&user));
+                        c.add_parse_result(parsed, &tz, since, until, tolerance);
+                    }
+                    Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
+                }
             }
         }
     }
@@ -716,6 +725,49 @@ mod tests {
                 },
             ]
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn explicit_crontab_is_not_counted_again_by_the_system_root_scan() {
+        // The file is both `<root>/etc/crontab` and the path passed as
+        // `--crontab`. It is one job. A second copy would take the only
+        // matching log line and leave the other copy MISSED.
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-no-double-scan-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        let crontab_path = dir.join("etc/crontab");
+        std::fs::write(&crontab_path, "0 3 * * * root /bin/backup.sh\n").unwrap();
+        let syslog_path = dir.join("cov.log");
+        std::fs::write(
+            &syslog_path,
+            "Oct 20 02:00:00 host CRON[1]: (root) CMD (/bin/other.sh)\n\
+             Oct 20 03:00:01 host CRON[2]: (root) CMD (/bin/backup.sh)\n\
+             Oct 20 04:00:00 host CRON[3]: (root) CMD (/bin/other.sh)\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            syslogs: vec![InputPath::File(syslog_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        assert_eq!(audit.ledger.entries.len(), 1);
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Ok);
+        assert_eq!(crate::report::exit_code(&audit.ledger), 0);
+        let warnings = audit.ledger.warnings.join("\n");
+        assert!(!warnings.contains("share this command"), "{warnings}");
         std::fs::remove_dir_all(&dir).ok();
     }
 

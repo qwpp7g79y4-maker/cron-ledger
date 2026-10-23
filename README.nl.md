@@ -32,11 +32,11 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--tolerance 5m] [--json]
 ```
 
-`-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`: een pad dat niet bestaat, zodat de scan niets vindt en je eigen `/etc/crontab` en `/etc/cron.d/*` niet meegenomen worden.
+`-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`. Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` zet die scan al uit, dus dat pad wordt niet gelezen. Het blijft in het voorbeeld staan zodat het weglaten van de bronvlag je eigen `/etc/crontab` en `/etc/cron.d/*` niet meeneemt.
 
 ### Systeemcrontab (`--crontab`, en de standaardscan van `--system-root`)
 
-Zonder `--crontab`, `--crontab-user` of `--timer-unit` scant cron-ledger zelf `--system-root DIR` (standaard `/`) op `DIR/etc/crontab`, `DIR/etc/cron.d/*` en `DIR/var/spool/cron/**`, dezelfde indeling als een echt systeem:
+Zonder `--crontab`, `--crontab-user` of `--timer-unit` scant cron-ledger zelf `--system-root DIR` (standaard `/`) op `DIR/etc/crontab`, `DIR/etc/cron.d/*` en `DIR/var/spool/cron/**`, dezelfde indeling als een echt systeem. `--system-root` wijst die scan naar een momentopname in plaats van `/`, en de scan draait dan nog steeds. Eén van die drie vlaggen kiest precies de bestanden die je noemt en scant de systeemroot niet óók. Hetzelfde bestand een tweede keer lezen plant het commando twee keer in, en één logregel kan maar één van de twee kopieën dekken, zodat de extra kopie als `MISSED` zou gelden.
 
 ```sh
 cron-ledger --system-root /path/to/a/system/snapshot \
@@ -143,6 +143,7 @@ Elke claim in deze README wordt gedekt door een bestaande test of fixture in dez
 | Claim | Test / fixture |
 |---|---|
 | `MISSED` alleen binnen het bereik van één invoerbestand, van de eerste herkende regel van dat bestand tot de laatste. Een gat binnen dat bereik zonder passende regel is `MISSED`, ook 19–21 oktober tussen een regel op de 18e en een regel op de 22e in hetzelfde bestand. Een gat tussen twee bestanden, ook niet-aansluitende `s.1` en `s.2.gz`, een gat vóór het eerste bestand of ná het laatste, een lege log, en een gat dat precies op de venstergrens tussen twee bestanden valt, zijn `NO_TRACE`. Een tijd gelijk aan de eerste of laatste regel van een bestand valt binnen dat bereik. `--json` `log_coverage` is de buitenste grens; het tekstrapport noemt elk bestandsbereik | `tests/ledger_golden.rs` (`log_gap_missed_only_in_covered_days`, `interior_gap_between_first_and_last_log_line_is_missed`, `gap_between_two_log_files_is_no_trace`, `gap_on_the_window_edge_between_two_files_is_no_trace`), `src/app.rs::non_adjacent_rotation_files_are_separate_coverage_spans`, `tests/cli_report.rs::no_trace_only_scenario_exits_three` (`tests/fixtures/report/no_trace/`) |
+| Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` is de volledige verzameling jobs. De scan van `--system-root` draait dan niet óók, zodat een bestand onder die root niet een tweede keer wordt ingepland. `--system-root` zonder die vlaggen scant die map nog steeds | `src/app.rs::explicit_crontab_is_not_counted_again_by_the_system_root_scan`, `src/app.rs::system_root_default_scan_reads_etc_crontab_cron_d_and_spool` |
 
 ## Ontwikkeling
 
