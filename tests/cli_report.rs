@@ -132,6 +132,65 @@ fn no_trace_only_scenario_exits_three() {
 }
 
 #[test]
+fn until_earlier_than_since_is_a_usage_error_exit_two() {
+    // A daily job exists. An inverted window expands to no expected
+    // runs, so without this check the audit exits 0 and looks clean.
+    let root = empty_root();
+    let dir = fixture("ok");
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .arg("--system-root")
+        .arg(&root)
+        .arg("--crontab")
+        .arg(dir.join("crontab"))
+        .arg("--tz")
+        .arg("UTC")
+        .arg("--since")
+        .arg("2026-10-21T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-20T00:00:00Z")
+        .assert()
+        .code(2);
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "--until (2026-10-20T00:00:00Z) is earlier than --since (2026-10-21T00:00:00Z)"
+        ),
+        "stderr: {stderr}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "an inverted window must not print an audit"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn until_equal_to_since_still_audits() {
+    // An equal bound is an empty window, not a usage error.
+    let root = empty_root();
+    let dir = fixture("ok");
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .arg("--system-root")
+        .arg(&root)
+        .arg("--crontab")
+        .arg(dir.join("crontab"))
+        .arg("--tz")
+        .arg("UTC")
+        .arg("--since")
+        .arg("2026-10-20T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-20T00:00:00Z")
+        .assert()
+        .code(0);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(stdout.contains("verwacht: 0"), "{stdout}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
 fn missing_since_is_a_usage_error_exit_two() {
     let root = empty_root();
     Command::cargo_bin("cron-ledger")

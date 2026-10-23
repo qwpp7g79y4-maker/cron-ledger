@@ -130,7 +130,7 @@ cron-ledger --system-root /nonexistent \
 |---|---|
 | `0` | Everything is `OK` (ignoring `REBOOT_ONLY`/`UNSUPPORTED_TRIGGER`, which are informational only). |
 | `1` | At least one `MISSED` or `LATE`. |
-| `2` | Usage or parse error (bad flags, more than one stdin source, an explicitly-named input file that can't be read). |
+| `2` | Usage or parse error (bad flags, `--until` earlier than `--since`, more than one stdin source, an explicitly-named input file that can't be read). |
 | `3` | No `MISSED`/`LATE`, but at least one `NO_TRACE`. |
 
 ## What it does NOT do
@@ -169,6 +169,7 @@ none of the numbers in this README are unmeasured benchmark badges.
 | `--crontab-user USER=PATH` reads one user's crontab explicitly | `src/app.rs::crontab_user_flag_reads_a_per_user_crontab_file`, `src/cli.rs::crontab_user_splits_on_equals` |
 | Timezone- and DST-aware schedule expansion (system tz, `--tz`, per-line `CRON_TZ=`), cronie-style spring-gap/fall-fold handling for Europe/Amsterdam and America/New_York, strictly increasing output | `src/schedule.rs` unit tests (`amsterdam_*`, `new_york_*`, `times_are_strictly_increasing_for_a_busy_schedule`, the `expand_is_always_sorted_and_in_range` property test) |
 | Reads systemd `.timer` units: `OnCalendar=` (`daily`, weekday ranges, `*:0/15`, explicit tz suffix), `Persistent=`, `RandomizedDelaySec=`, `AccuracySec=`, `Unit=`, cross-checked once by hand against `systemd-analyze calendar` | `tests/systemd_golden.rs` (`tests/fixtures/systemd/{daily,weekday-business,quarter-hour,tz-suffix}.timer`, `tests/fixtures/systemd/README.md`) |
+| Several timer files with the same `Unit=` keep every description, combined, and a repeated description is stored once | `src/app.rs::two_timers_sharing_a_unit_combine_their_descriptions` |
 | `Persistent=true` turns a missed-then-caught-up run into `LATE (caught up)`, not `MISSED` | `tests/systemd_golden.rs::persistent_missed_run_is_late_caught_up_not_missed` (`tests/fixtures/systemd/persistent-backup.timer`) |
 | A monotonic-only trigger (`OnBootSec=`, ...) is flagged `UNSUPPORTED_TRIGGER`, not a crash | `tests/systemd_golden.rs::onbootsec_is_flagged_unsupported_with_no_oncalendar` (`tests/fixtures/systemd/unsupported-trigger.timer`) |
 | Parses Debian/Ubuntu syslog and RHEL/cronie `/var/log/cron` (incl. `CMDOUT`/`CMDEND`): RFC3164, RFC5424, and rsyslog's high-precision file format (a leading RFC3339 timestamp, no priority; numeric offset or `Z`), and infers the missing RFC3164 year across a Dec 31 → Jan 1 boundary | `tests/log_golden.rs` (`tests/fixtures/logs/{debian-syslog,rhel-cron,rfc5424,rsyslog-fileformat,year-boundary}.log`) |
@@ -179,7 +180,7 @@ none of the numbers in this README are unmeasured benchmark badges.
 | Matches each expected run to the nearest event within tolerance, independently per `(user, command)` or timer unit, including duplicate commands across users and a `%`-containing command | `tests/ledger_golden.rs` (`duplicate_command_two_users_matches_independently`, `percent_command_job_matches_on_the_split_command`) |
 | `@reboot` never produces expected times; it only reports found boots as `REBOOT_ONLY` | `tests/ledger_golden.rs::reboot_job_reports_found_boots_for_info_only` |
 | `MISSED` is only reported inside the span the logs actually cover; a gap or empty logs become `NO_TRACE`/a coverage warning, never a false `MISSED` | `tests/ledger_golden.rs::log_gap_missed_only_in_covered_days`, `tests/cli_report.rs::no_trace_only_scenario_exits_three` (`tests/fixtures/report/no_trace/`) |
-| Exit codes 0/1/2/3 as documented above | `src/report/mod.rs` unit tests, `tests/cli_report.rs` (`ok_scenario_exits_zero`, `missed_scenario_exits_one`, `late_scenario_exits_one`, `no_trace_only_scenario_exits_three`, `missing_since_is_a_usage_error_exit_two`, `more_than_one_stdin_source_is_a_usage_error_exit_two`) |
+| Exit codes 0/1/2/3 as documented above | `src/report/mod.rs` unit tests, `tests/cli_report.rs` (`ok_scenario_exits_zero`, `missed_scenario_exits_one`, `late_scenario_exits_one`, `no_trace_only_scenario_exits_three`, `missing_since_is_a_usage_error_exit_two`, `until_earlier_than_since_is_a_usage_error_exit_two`, `until_equal_to_since_still_audits`, `more_than_one_stdin_source_is_a_usage_error_exit_two`) |
 | `--json` emits a `schema_version: 1` report | `tests/cli_report.rs::json_flag_produces_a_schema_versioned_report`, `tests/report_golden.rs` |
 | The text report has no ANSI color on a non-tty, and respects `NO_COLOR` | `src/report/mod.rs::color_requires_both_a_tty_and_no_color_unset`, `tests/report_golden.rs::color_wraps_status_words_in_ansi_codes_when_enabled`, `tests/cli_report.rs::ok_scenario_exits_zero` |
 | At most one input source may read from stdin (`-`) | `src/cli.rs::at_most_one_stdin_source`, `tests/cli_report.rs::more_than_one_stdin_source_is_a_usage_error_exit_two` |

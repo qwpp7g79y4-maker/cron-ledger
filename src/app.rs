@@ -117,15 +117,7 @@ impl Collector {
                 (JobSchedule::Standard(expected), describe_schedule(s))
             }
         };
-        self.descriptions
-            .entry(key.clone())
-            .and_modify(|existing| {
-                if *existing != description {
-                    existing.push_str(", ");
-                    existing.push_str(&description);
-                }
-            })
-            .or_insert(description);
+        self.merge_description(&key, description);
         self.jobs.push(ScheduledJob {
             key,
             file: job.file.clone(),
@@ -151,6 +143,22 @@ impl Collector {
         for job in &result.jobs {
             self.add_cron_job(job, default_tz, since, until, tolerance);
         }
+    }
+
+    /// Keep every description for `key`. Several crontab lines, or several
+    /// timer files with the same `Unit=`, share one key, and the report
+    /// looks that key up for each of them. A repeated description is stored
+    /// once.
+    fn merge_description(&mut self, key: &JobKey, description: String) {
+        self.descriptions
+            .entry(key.clone())
+            .and_modify(|existing| {
+                if *existing != description {
+                    existing.push_str(", ");
+                    existing.push_str(&description);
+                }
+            })
+            .or_insert(description);
     }
 }
 
@@ -230,6 +238,13 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         Some(v) => resolve_timestamp(v, now)?,
         None => now,
     };
+    // An equal bound is an empty window and still a normal audit. An
+    // inverted one expands to nothing and would otherwise exit 0.
+    if until < since {
+        return Err(format!(
+            "--until ({until}) is earlier than --since ({since})"
+        ));
+    }
     let tolerance = cli.tolerance;
 
     let mut c = Collector {
@@ -335,8 +350,8 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         let timer_tolerance = systemd::effective_tolerance(tolerance, &timer);
 
         if timer.on_calendar.is_empty() && !timer.unsupported_triggers.is_empty() {
-            c.descriptions.insert(
-                key.clone(),
+            c.merge_description(
+                &key,
                 format!("unsupported: {}", timer.unsupported_triggers.join(", ")),
             );
             c.jobs.push(ScheduledJob {
@@ -364,8 +379,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             }
             all_times.sort();
             all_times.dedup();
-            c.descriptions
-                .insert(key.clone(), timer.on_calendar.join("; "));
+            c.merge_description(&key, timer.on_calendar.join("; "));
             c.jobs.push(ScheduledJob {
                 key,
                 file: label,
@@ -767,5 +781,97 @@ mod tests {
             "description {description:?} lost the second schedule"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn two_timers_sharing_a_unit_combine_their_descriptions() {
+        // `Unit=` makes several timer files one JobKey::Timer. The report
+        // looks that key up once per ledger entry, so a later insert used
+        // to replace the description on every entry.
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-shared-timer-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let early = dir.join("early.timer");
+        let late = dir.join("late.timer");
+        std::fs::write(
+            &early,
+            "[Timer]\nOnCalendar=*-*-* 03:00:00\nUnit=backup.service\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &late,
+            "[Timer]\nOnCalendar=*-*-* 15:00:00\nUnit=backup.service\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            timer_units: vec![InputPath::File(early), InputPath::File(late.clone())],
+            ..Cli::default()
+        };
+        let now = ts("2026-10-22T00:00:00Z");
+        let key = JobKey::Timer {
+            unit: "backup.service".to_string(),
+        };
+
+        let audit = build(&cli, now).unwrap();
+        assert_eq!(audit.ledger.entries.len(), 2);
+        assert!(audit.ledger.entries.iter().all(|e| e.key == key));
+        assert_eq!(
+            audit.descriptions.get(&key).map(String::as_str),
+            Some("*-*-* 03:00:00, *-*-* 15:00:00")
+        );
+        let text = render(&audit);
+        assert_eq!(
+            text.matches("[*-*-* 03:00:00, *-*-* 15:00:00]").count(),
+            2,
+            "{text}"
+        );
+
+        // The same description from a second file is kept once.
+        std::fs::write(
+            &late,
+            "[Timer]\nOnCalendar=*-*-* 03:00:00\nUnit=backup.service\n",
+        )
+        .unwrap();
+        let audit = build(&cli, now).unwrap();
+        assert_eq!(
+            audit.descriptions.get(&key).map(String::as_str),
+            Some("*-*-* 03:00:00")
+        );
+
+        // The monotonic-only branch joins the same map.
+        std::fs::write(&late, "[Timer]\nOnBootSec=5min\nUnit=backup.service\n").unwrap();
+        let audit = build(&cli, now).unwrap();
+        assert_eq!(
+            audit.descriptions.get(&key).map(String::as_str),
+            Some("*-*-* 03:00:00, unsupported: OnBootSec")
+        );
+        let text = render(&audit);
+        assert_eq!(
+            text.matches("[*-*-* 03:00:00, unsupported: OnBootSec]")
+                .count(),
+            2,
+            "{text}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn render(audit: &Audit) -> String {
+        let ctx = crate::report::ReportContext {
+            since: audit.since,
+            until: audit.until,
+            tz: &audit.tz,
+            tolerance: audit.tolerance,
+            descriptions: &audit.descriptions,
+            extra_warnings: &audit.extra_warnings,
+        };
+        crate::report::render_text(&audit.ledger, &ctx, false)
     }
 }
