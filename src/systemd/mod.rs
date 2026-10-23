@@ -6,7 +6,10 @@
 pub mod calendar;
 pub mod timer_unit;
 
-pub use calendar::{expand as expand_calendar, parse as parse_calendar, SystemdCalendar};
+pub use calendar::{
+    expand as expand_calendar, first_on_or_after as first_calendar_on_or_after,
+    parse as parse_calendar, SystemdCalendar,
+};
 pub use timer_unit::{
     effective_tolerance, evaluate_missed_run, evaluate_missed_runs, parse_duration,
     parse_timer_unit, MissedRunStatus, TimerUnit,

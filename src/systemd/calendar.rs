@@ -461,6 +461,33 @@ pub fn expand(
     Ok(out)
 }
 
+/// First elapse at or after `at`. The audit window is `[since, until)`,
+/// so `at = until` is the first firing the window itself does not
+/// contain. `Ok(None)` when nothing fires within about eleven years
+/// (enough for a 29 February calendar). The window widens so a
+/// minutely calendar does not materialise years of instants.
+pub fn first_on_or_after(
+    cal: &SystemdCalendar,
+    default_tz: &jiff::tz::TimeZone,
+    at: jiff::Timestamp,
+) -> Result<Option<jiff::Timestamp>, String> {
+    let mut span_days: i64 = 2;
+    for _ in 0..12 {
+        let secs = span_days.saturating_mul(24 * 60 * 60);
+        // Seconds, not calendar days: a `Timestamp` rejects a span whose
+        // units are not fixed-length. Overflow means there is no later
+        // elapse this function can name.
+        let Ok(horizon) = at.checked_add(jiff::Span::new().seconds(secs)) else {
+            return Ok(None);
+        };
+        if let Some(t) = expand(cal, default_tz, at, horizon)?.into_iter().next() {
+            return Ok(Some(t));
+        }
+        span_days = span_days.saturating_mul(2);
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,6 +507,15 @@ mod tests {
                     .to_string()
             })
             .collect()
+    }
+
+    #[test]
+    fn daily_first_on_or_after_is_the_elapse_the_window_excludes() {
+        let cal = parse("daily").unwrap();
+        let tz = TimeZone::UTC;
+        let at: Timestamp = "2026-10-21T00:00:00Z".parse().unwrap();
+        let got = first_on_or_after(&cal, &tz, at).unwrap();
+        assert_eq!(got, Some(at));
     }
 
     #[test]

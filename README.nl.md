@@ -121,7 +121,7 @@ cron-ledger --system-root /nonexistent \
 ## Wat het NIET doet
 
 - Geen live monitoring of alerting; het is een achteraf-analyse van een venster.
-- Het ziet geen runs als er geen logs zijn. Ontbrekende of geroteerde logs geven NO_TRACE, geen bewijs dat de job niet draaide.
+- Het ziet geen runs als er geen logs zijn. Lege logs, en verwachte tijden buiten het bereik van de eerste tot de laatste logregel, zijn NO_TRACE. Een gat tussen die twee regels ligt nog binnen het bereik, dus een run zonder passende regel is daar MISSED.
 - Weet niet of een job **gelukt** is, tenzij cronie CMDEND of de journal de exitcode logt.
 - Geen anacron, fcron, Kubernetes CronJobs of macOS launchd (v1). Geen OnBootSec/OnUnitActiveSec.
 - Leest geen crontabs via `crontab -l` zelf; geef de uitvoer via stdin.

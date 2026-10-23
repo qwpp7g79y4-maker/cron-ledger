@@ -142,6 +142,7 @@ fn parse_lines(
     has_user_column: bool,
     implied_user: Option<&str>,
 ) -> ParseResult {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let mut result = ParseResult::default();
     let mut env = EnvState {
         tz: None,
@@ -287,6 +288,14 @@ mod tests {
         assert_eq!(job.user.as_deref(), Some("alice"));
         assert_eq!(job.command, "echo hi");
         assert_eq!(job.stdin, None);
+    }
+
+    #[test]
+    fn leading_bom_does_not_drop_the_first_job() {
+        let result = parse_system_crontab("\u{feff}0 3 * * * root /bin/backup.sh\n", "bom.ct");
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(result.jobs.len(), 1);
+        assert_eq!(result.jobs[0].command, "/bin/backup.sh");
     }
 
     #[test]

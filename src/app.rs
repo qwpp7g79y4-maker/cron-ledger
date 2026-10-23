@@ -234,16 +234,35 @@ fn classify_cron_d_file_name(name: &str) -> CronDFileName {
     }
 }
 
-fn walk_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) {
+/// Crontab files under `dir`, in sorted path order.
+///
+/// A symlink to a regular file is included: Debian cron runs those in
+/// `cron.d` and in the spool. A symlink to a directory is not walked.
+/// `is_dir` would follow it, and a pair of links back to `dir` then
+/// walks without bound. An extracted tree passed as `--system-root` is
+/// not trusted to be free of those. `recurse` is for `var/spool/cron/**`.
+/// `/etc/cron.d` is one directory: cron does not run a file in a
+/// subdirectory.
+fn collect_files(dir: &Path, recurse: bool, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     let mut children: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
     children.sort();
     for child in children {
-        if child.is_dir() {
-            walk_files_sorted(&child, out);
-        } else if child.is_file() {
+        let Ok(meta) = std::fs::symlink_metadata(&child) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            // `metadata` follows the link and errors on a loop, so a
+            // cycle contributes nothing. A directory target is not a
+            // crontab and is not entered.
+            if std::fs::metadata(&child).is_ok_and(|target| target.is_file()) {
+                out.push(child);
+            }
+        } else if recurse && meta.is_dir() {
+            collect_files(&child, true, out);
+        } else if meta.is_file() {
             out.push(child);
         }
     }
@@ -309,7 +328,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     let cron_d = root.join("etc/cron.d");
     if cron_d.is_dir() {
         let mut files = Vec::new();
-        walk_files_sorted(&cron_d, &mut files);
+        collect_files(&cron_d, false, &mut files);
         for file in files {
             let name = match file.file_name().and_then(|n| n.to_str()) {
                 Some(name) => name,
@@ -341,7 +360,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     let spool = root.join("var/spool/cron");
     if spool.is_dir() {
         let mut files = Vec::new();
-        walk_files_sorted(&spool, &mut files);
+        collect_files(&spool, true, &mut files);
         for file in files {
             let user = file
                 .file_name()
@@ -388,10 +407,35 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             });
         } else {
             let mut all_times: Vec<Timestamp> = Vec::new();
+            // The first elapse at or after `until` is the next slot, same
+            // bound a crontab uses. Without it a timer whose window holds
+            // one elapse treats every later start, including the next
+            // day's, as LATE. Several `OnCalendar=` lines share one unit,
+            // so the bound is the earliest of their next elapses.
+            // `Persistent=true` stays unbounded: the catch-up runs at the
+            // next boot, which can be after that next elapse, and the
+            // observed start has to stay attached. The search is not
+            // capped at a few tolerances.
+            let mut next_after_window: Option<Timestamp> = None;
+            let next_elapse = |cal: &systemd::SystemdCalendar| -> Option<Timestamp> {
+                if timer.persistent {
+                    None
+                } else {
+                    systemd::first_calendar_on_or_after(cal, &tz, until)
+                        .ok()
+                        .flatten()
+                }
+            };
             for cal_str in &timer.on_calendar {
                 match systemd::parse_calendar(cal_str) {
                     Ok(cal) => match systemd::expand_calendar(&cal, &tz, since, until) {
-                        Ok(times) => all_times.extend(times),
+                        Ok(times) => {
+                            all_times.extend(times);
+                            if let Some(t) = next_elapse(&cal) {
+                                next_after_window =
+                                    Some(next_after_window.map_or(t, |prev| prev.min(t)));
+                            }
+                        }
                         Err(e) => c
                             .warnings
                             .push(format!("{label}: OnCalendar '{cal_str}': {e}")),
@@ -411,7 +455,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                 schedule: JobSchedule::Standard(all_times),
                 tolerance: timer_tolerance,
                 persistent: timer.persistent,
-                next_after_window: None,
+                next_after_window,
             });
         }
     }
@@ -1045,5 +1089,246 @@ mod tests {
             extra_warnings: &audit.extra_warnings,
         };
         crate::report::render_text(&audit.ledger, &ctx, false)
+    }
+
+    fn timer_window(dir: &Path, unit_text: &str, journal: &str) -> Audit {
+        let timer_path = dir.join("d.timer");
+        std::fs::write(&timer_path, unit_text).unwrap();
+        let journal_path = dir.join("journal.jsonl");
+        std::fs::write(&journal_path, journal).unwrap();
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.to_path_buf(),
+            timer_units: vec![InputPath::File(timer_path)],
+            journal_json: vec![InputPath::File(journal_path)],
+            ..Cli::default()
+        };
+        build(&cli, ts("2026-10-22T00:00:00Z")).unwrap()
+    }
+
+    fn started_line(when: &str) -> String {
+        let us = ts(when).as_microsecond();
+        format!(
+            "{{\"__REALTIME_TIMESTAMP\":\"{us}\",\"SYSLOG_IDENTIFIER\":\"systemd\",\"UNIT\":\"d.service\",\"MESSAGE\":\"Started d.\"}}\n"
+        )
+    }
+
+    #[test]
+    fn daily_timer_does_not_claim_the_next_days_start() {
+        // One elapse in the window (daily, midnight on the 20th). A start
+        // at the next midnight is that schedule's next firing. With a log
+        // line that covers the elapse, the elapse is MISSED. With only the
+        // next day's line, the elapse sits outside the log span and is
+        // NO_TRACE. Neither outcome is LATE.
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-timer-nextday-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cover_us = ts("2026-10-20T00:00:00Z").as_microsecond();
+        let journal = format!(
+            "{{\"__REALTIME_TIMESTAMP\":\"{cover_us}\",\"SYSLOG_IDENTIFIER\":\"sshd\",\"MESSAGE\":\"cover\"}}\n{}",
+            started_line("2026-10-21T00:00:01Z")
+        );
+        let audit = timer_window(&dir, "[Timer]\nOnCalendar=daily\n", &journal);
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Missed);
+        assert!(outcomes[0].actual.is_none());
+
+        let only_next = timer_window(
+            &dir,
+            "[Timer]\nOnCalendar=daily\n",
+            &started_line("2026-10-21T00:00:01Z"),
+        );
+        let crate::ledger::JobOutcome::Standard(outcomes) = &only_next.ledger.entries[0].outcome
+        else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::NoTrace);
+        assert!(outcomes[0].actual.is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn daily_timer_keeps_a_same_day_late_start_and_a_persistent_catchup() {
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-timer-late-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let late = timer_window(
+            &dir,
+            "[Timer]\nOnCalendar=daily\n",
+            &started_line("2026-10-20T02:00:00Z"),
+        );
+        let crate::ledger::JobOutcome::Standard(outcomes) = &late.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Late);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-20T02:00:00Z")));
+
+        let boot_us = ts("2026-10-20T08:12:00Z").as_microsecond();
+        let start_us = ts("2026-10-20T08:14:00Z").as_microsecond();
+        let journal = format!(
+            "{{\"__REALTIME_TIMESTAMP\":\"{boot_us}\",\"__MONOTONIC_TIMESTAMP\":\"28800000000\",\"_BOOT_ID\":\"b1\",\"_TRANSPORT\":\"kernel\",\"SYSLOG_IDENTIFIER\":\"kernel\",\"MESSAGE\":\"Linux version 6.1.0\"}}\n\
+             {{\"__REALTIME_TIMESTAMP\":\"{start_us}\",\"SYSLOG_IDENTIFIER\":\"systemd\",\"UNIT\":\"d.service\",\"MESSAGE\":\"Started d.\"}}\n"
+        );
+        let caught = timer_window(
+            &dir,
+            "[Timer]\nOnCalendar=daily\nPersistent=true\n",
+            &journal,
+        );
+        let crate::ledger::JobOutcome::Standard(outcomes) = &caught.ledger.entries[0].outcome
+        else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::LateCaughtUp);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-20T08:14:00Z")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn persistent_catchup_after_the_next_elapse_keeps_the_start_time() {
+        // The window holds one daily elapse (the 20th). The next elapse
+        // is the 21st at midnight. The machine comes back on the 22nd
+        // and `Persistent=true` starts the unit then. That start is the
+        // catch-up, so its own timestamp stays the actual time. A
+        // non-persistent timer must not claim a start past that next
+        // elapse; this one must.
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-timer-catchup-after-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cover_us = ts("2026-10-20T00:00:00Z").as_microsecond();
+        let boot_us = ts("2026-10-22T08:12:00Z").as_microsecond();
+        let start_us = ts("2026-10-22T08:14:00Z").as_microsecond();
+        let journal = format!(
+            "{{\"__REALTIME_TIMESTAMP\":\"{cover_us}\",\"SYSLOG_IDENTIFIER\":\"sshd\",\"MESSAGE\":\"cover\"}}\n\
+             {{\"__REALTIME_TIMESTAMP\":\"{boot_us}\",\"__MONOTONIC_TIMESTAMP\":\"28800000000\",\"_BOOT_ID\":\"b1\",\"_TRANSPORT\":\"kernel\",\"SYSLOG_IDENTIFIER\":\"kernel\",\"MESSAGE\":\"Linux version 6.1.0\"}}\n\
+             {{\"__REALTIME_TIMESTAMP\":\"{start_us}\",\"SYSLOG_IDENTIFIER\":\"systemd\",\"UNIT\":\"d.service\",\"MESSAGE\":\"Started d.\"}}\n"
+        );
+        let caught = timer_window(
+            &dir,
+            "[Timer]\nOnCalendar=daily\nPersistent=true\n",
+            &journal,
+        );
+        let crate::ledger::JobOutcome::Standard(outcomes) = &caught.ledger.entries[0].outcome
+        else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::LateCaughtUp);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-22T08:14:00Z")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cron_d_ignores_a_subdirectory_and_spool_reads_one() {
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-cron-d-depth-{}",
+            std::process::id()
+        ));
+        let cron_d = dir.join("etc/cron.d");
+        let nested = cron_d.join("sub");
+        let spool_user = dir.join("var/spool/cron/crontabs");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(&spool_user).unwrap();
+        std::fs::write(
+            nested.join("x"),
+            "0 4 * * * root /usr/local/bin/nested.sh\n",
+        )
+        .unwrap();
+        std::fs::write(
+            cron_d.join("kept"),
+            "0 4 * * * root /usr/local/bin/kept.sh\n",
+        )
+        .unwrap();
+        std::fs::write(
+            spool_user.join("alice"),
+            "0 5 * * * /usr/local/bin/alice.sh\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let mut commands: Vec<String> = audit
+            .ledger
+            .entries
+            .iter()
+            .map(|e| match &e.key {
+                JobKey::Cron { command, .. } => command.clone(),
+                JobKey::Timer { unit } => unit.clone(),
+            })
+            .collect();
+        commands.sort();
+        assert_eq!(
+            commands,
+            vec![
+                "/usr/local/bin/alice.sh".to_string(),
+                "/usr/local/bin/kept.sh".to_string(),
+            ]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_cycle_in_cron_d_and_spool_is_not_walked() {
+        use std::os::unix::fs::symlink;
+
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-symlink-cycle-{}",
+            std::process::id()
+        ));
+        let cron_d = dir.join("etc/cron.d");
+        let spool = dir.join("var/spool/cron");
+        std::fs::create_dir_all(&cron_d).unwrap();
+        std::fs::create_dir_all(&spool).unwrap();
+        std::fs::write(
+            cron_d.join("kept"),
+            "0 4 * * * root /usr/local/bin/kept.sh\n",
+        )
+        .unwrap();
+        // A symlink to a file is a crontab. The two links back to this
+        // directory are not, and walking them would not finish.
+        symlink("kept", cron_d.join("linked")).unwrap();
+        symlink(".", cron_d.join("a")).unwrap();
+        symlink(".", cron_d.join("b")).unwrap();
+        symlink(".", spool.join("a")).unwrap();
+        symlink(".", spool.join("b")).unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let commands: Vec<String> = audit
+            .ledger
+            .entries
+            .iter()
+            .map(|e| match &e.key {
+                JobKey::Cron { command, .. } => command.clone(),
+                JobKey::Timer { unit } => unit.clone(),
+            })
+            .collect();
+        assert_eq!(
+            commands,
+            vec![
+                "/usr/local/bin/kept.sh".to_string(),
+                "/usr/local/bin/kept.sh".to_string(),
+            ]
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

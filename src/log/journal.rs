@@ -22,13 +22,37 @@ fn warn(warnings: &mut Vec<LogWarning>, file: &str, line: usize, message: impl I
     });
 }
 
-fn extract_string(value: Option<&Value>) -> Option<String> {
+/// One journal field as text. A string is itself. journalctl encodes a
+/// repeated field as an array of that value; every element has to be
+/// the same string, otherwise the field is ambiguous and rejected.
+fn single_string_field(value: Option<&Value>) -> Option<String> {
     match value? {
         Value::String(s) => Some(s.clone()),
         Value::Array(items) => {
-            let bytes: Option<Vec<u8>> =
-                items.iter().map(|v| v.as_u64().map(|n| n as u8)).collect();
-            bytes.map(|b| String::from_utf8_lossy(&b).into_owned())
+            let first = items.first()?.as_str()?;
+            if items.iter().all(|item| item.as_str() == Some(first)) {
+                Some(first.to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn extract_string(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(s) => Some(s.clone()),
+        // journalctl encodes a non-UTF-8 field as an array of byte
+        // values, each 0..=255. A larger number is not that encoding;
+        // wrapping it with `as u8` would invent a different message.
+        Value::Array(items) => {
+            let mut bytes = Vec::with_capacity(items.len());
+            for item in items {
+                let n = item.as_u64()?;
+                bytes.push(u8::try_from(n).ok()?);
+            }
+            Some(String::from_utf8_lossy(&bytes).into_owned())
         }
         _ => None,
     }
@@ -59,12 +83,20 @@ fn extract_realtime_timestamp(value: Option<&Value>) -> Option<Timestamp> {
 const BOOT_START_MAX_MONOTONIC_US: i64 = 120_000_000;
 
 fn is_kernel_record(obj: &serde_json::Map<String, Value>) -> bool {
-    let identifier = obj
+    // `/dev/kmsg` entries arrive with `_TRANSPORT=kernel`. A line a user
+    // wrote with `logger -t kernel` has `_TRANSPORT=syslog` and the same
+    // identifier; that is not a boot banner. An export that simply omits
+    // `_TRANSPORT` still counts on the identifier, which is how a
+    // hand-trimmed journal line names the kernel.
+    let identifier_is_kernel = obj
         .get("SYSLOG_IDENTIFIER")
         .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let transport = obj.get("_TRANSPORT").and_then(|v| v.as_str()).unwrap_or("");
-    identifier.eq_ignore_ascii_case("kernel") || transport == "kernel"
+        .is_some_and(|id| id.eq_ignore_ascii_case("kernel"));
+    match obj.get("_TRANSPORT").and_then(|v| v.as_str()) {
+        Some("kernel") => true,
+        Some(_) => false,
+        None => identifier_is_kernel,
+    }
 }
 
 /// The first lines a kernel prints, imported by journald from `/dev/kmsg`.
@@ -94,7 +126,7 @@ fn received_at_boot_start(obj: &serde_json::Map<String, Value>) -> bool {
 fn extract_pid(obj: &serde_json::Map<String, Value>) -> Option<u32> {
     match obj.get("_PID")? {
         Value::String(s) => s.parse().ok(),
-        Value::Number(n) => n.as_u64().map(|n| n as u32),
+        Value::Number(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()),
         _ => None,
     }
 }
@@ -126,6 +158,7 @@ fn is_pam_session_message(message: &str) -> bool {
 
 /// Parse `journalctl -o json` NDJSON output into [`LogEvent`]s.
 pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let mut events = Vec::new();
     let mut warnings = Vec::new();
     let mut coverage_timestamps = Vec::new();
@@ -190,10 +223,22 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
             }
         }
 
-        let identifier = obj
-            .get("SYSLOG_IDENTIFIER")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        // Missing is normal (not every entry is cron). An array that is
+        // not one repeated string, or some other type, is a field we
+        // cannot attribute; ignoring it would drop a real cron line.
+        let identifier = match single_string_field(obj.get("SYSLOG_IDENTIFIER")) {
+            Some(s) => s,
+            None if obj.get("SYSLOG_IDENTIFIER").is_none() => String::new(),
+            None => {
+                warn(
+                    &mut warnings,
+                    file,
+                    line_no,
+                    "SYSLOG_IDENTIFIER is not a single string",
+                );
+                String::new()
+            }
+        };
         // A real PID 1 message about a unit carries both fields:
         // `_SYSTEMD_UNIT` is the journal's own unit (`init.scope` for PID
         // 1), `UNIT` is the unit the message is about. Prefer `UNIT`.
@@ -416,6 +461,70 @@ mod tests {
         let content = r#"{"__REALTIME_TIMESTAMP":"1792483800000000","__MONOTONIC_TIMESTAMP":"600000000","_BOOT_ID":"abc","_TRANSPORT":"kernel","MESSAGE":"Linux version 6.1.0 (builder@host) (gcc) #1 SMP"}"#;
         let boots = boot_events(content);
         assert_eq!(boots.len(), 1);
+    }
+
+    #[test]
+    fn syslog_transport_kernel_banner_is_not_a_boot() {
+        // `logger -t kernel` stores this shape: the identifier says
+        // kernel, the transport says the message came from syslog.
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792483920000000","__MONOTONIC_TIMESTAMP":"28800000000","_BOOT_ID":"b1","_TRANSPORT":"syslog","SYSLOG_IDENTIFIER":"kernel","_UID":"1000","MESSAGE":"Linux version fake"}"#;
+        assert!(boot_events(content).is_empty());
+    }
+
+    #[test]
+    fn byte_above_255_is_not_decoded_as_a_different_message() {
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"CROND","MESSAGE":[40,114,111,111,116,41,32,67,77,68,32,40,354,97,99,107,117,112,46,115,104,41]}"#;
+        let result = parse_journal_json(content, "journal.json");
+        assert!(result.events.is_empty());
+        assert_eq!(result.warnings.len(), 1);
+    }
+
+    #[test]
+    fn pid_that_does_not_fit_in_u32_is_absent() {
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"CROND","_PID":4294967297,"MESSAGE":"(root) CMD (backup.sh)"}"#;
+        let result = parse_journal_json(content, "journal.json");
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(
+            result.events[0].source,
+            EventSource::CronCmd {
+                user: "root".to_string(),
+                pid: None,
+                command: "backup.sh".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn syslog_identifier_array_of_one_value_is_read() {
+        // journalctl stores a repeated field as an array. One value, or
+        // the same value repeated, is that identifier.
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":["CROND","CROND"],"MESSAGE":"(root) CMD (backup.sh)"}"#;
+        let result = parse_journal_json(content, "journal.json");
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(
+            result.events[0].source,
+            EventSource::CronCmd {
+                user: "root".to_string(),
+                pid: None,
+                command: "backup.sh".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn syslog_identifier_array_of_two_values_is_not_a_cron_line() {
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":["sshd","CROND"],"MESSAGE":"(root) CMD (backup.sh)"}"#;
+        let result = parse_journal_json(content, "journal.json");
+        assert!(result.events.is_empty());
+        assert_eq!(result.warnings.len(), 1);
+    }
+
+    #[test]
+    fn leading_bom_does_not_drop_the_first_journal_line() {
+        let content = "\u{feff}{\"__REALTIME_TIMESTAMP\":\"1792897201000000\",\"SYSLOG_IDENTIFIER\":\"CROND\",\"MESSAGE\":\"(root) CMD (backup.sh)\"}\n";
+        let result = parse_journal_json(content, "journal.json");
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(result.events.len(), 1);
     }
 
     #[test]

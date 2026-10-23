@@ -84,13 +84,39 @@ fn warn(warnings: &mut Vec<LogWarning>, file: &str, line: usize, message: impl I
 }
 
 /// Split the part of a line after the hostname into `(tag[pid], message)`.
+///
+/// The tag is one token. A `]: ` later in the message (a bare `CRON:` tag
+/// whose command contains `x[1]: y`) is not the tag's own separator.
 fn split_tag(rest: &str) -> Option<(&str, &str)> {
     if let Some(idx) = rest.find("]: ") {
-        Some((&rest[..=idx], rest[idx + 3..].trim_start()))
-    } else {
-        rest.split_once(": ")
-            .map(|(tag, msg)| (tag, msg.trim_start()))
+        let tag = &rest[..=idx];
+        if !tag.chars().any(char::is_whitespace) {
+            return Some((tag, rest[idx + 3..].trim_start()));
+        }
     }
+    rest.split_once(": ")
+        .map(|(tag, msg)| (tag, msg.trim_start()))
+}
+
+/// Strip a leading `<PRI>` when `PRI` is one to three digits. `None` when
+/// the line has no such prefix.
+fn strip_pri(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix('<')?;
+    let gt = rest.find('>')?;
+    let pri = &rest[..gt];
+    if pri.is_empty() || pri.len() > 3 || !pri.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(&rest[gt + 1..])
+}
+
+/// RFC5424 after the priority is `VERSION SP TIMESTAMP ...`, and VERSION
+/// is a short integer. `<PRI>Oct ...` and `<PRI>2026-10-20T...` are not.
+fn looks_like_rfc5424_version(after_pri: &str) -> bool {
+    let Some((ver, _)) = after_pri.split_once(' ') else {
+        return false;
+    };
+    !ver.is_empty() && ver.len() <= 3 && ver.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Split `n` leading whitespace-delimited fields off `line`, collapsing
@@ -332,25 +358,44 @@ fn parse_leading_rfc3339(
 ///
 /// `since` and `tz` seed the RFC3164 year inference (RFC3164 timestamps
 /// carry no year). RFC5424 lines and rsyslog's high-precision file format
-/// carry their own timestamp and do not need either.
+/// carry their own timestamp and do not need either. A traditional or
+/// file-format line may start with `<PRI>`; only `<PRI>VERSION ...` is
+/// RFC5424.
 pub fn parse_syslog_cron(
     content: &str,
     file: &str,
     since: Timestamp,
     tz: &TimeZone,
 ) -> LogParseResult {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let mut events = Vec::new();
     let mut warnings = Vec::new();
     let mut years = YearInference::new(tz, since);
 
     for (idx, raw_line) in content.lines().enumerate() {
         let line_no = idx + 1;
-        let line = raw_line.trim_end_matches('\r');
+        let mut line = raw_line.trim_end_matches('\r');
         if line.trim().is_empty() {
             continue;
         }
 
-        if line.starts_with('<') {
+        // `<PRI>` is shared by RFC5424 and by traditional lines. Only a
+        // numeric VERSION after the priority is RFC5424; anything else
+        // is the same line with the priority removed.
+        if let Some(after_pri) = strip_pri(line) {
+            if looks_like_rfc5424_version(after_pri) {
+                if let Some((timestamp, source)) = try_rfc5424(line, file, line_no, &mut warnings) {
+                    events.push(LogEvent {
+                        timestamp,
+                        source,
+                        file: file.to_string(),
+                        line: line_no,
+                    });
+                }
+                continue;
+            }
+            line = after_pri;
+        } else if line.starts_with('<') {
             if let Some((timestamp, source)) = try_rfc5424(line, file, line_no, &mut warnings) {
                 events.push(LogEvent {
                     timestamp,
@@ -561,6 +606,70 @@ Jan  1 00:01:00 host CRON[2]: (alice) CMD (x)
             result.events[1].timestamp.to_string(),
             "2027-01-01T00:01:00Z"
         );
+    }
+
+    #[test]
+    fn pri_prefixed_rfc3164_cron_line_is_read() {
+        let content = "<78>Oct 20 03:00:01 host CRON[1]: (root) CMD (/bin/backup.sh)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(
+            result.events[0].source,
+            EventSource::CronCmd {
+                user: "root".to_string(),
+                pid: Some(1),
+                command: "/bin/backup.sh".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn pri_prefixed_rfc3339_cron_line_is_read() {
+        let content = "<78>2026-10-20T03:00:01+00:00 host CRON[1]: (root) CMD (/bin/backup.sh)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(
+            result.events[0].timestamp.to_string(),
+            "2026-10-20T03:00:01Z"
+        );
+    }
+
+    #[test]
+    fn pri_prefixed_non_cron_line_stays_silent() {
+        let content = "<78>Oct 20 03:00:01 host sshd[1]: Accepted publickey for root\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.events, vec![]);
+        assert_eq!(result.warnings, vec![]);
+    }
+
+    #[test]
+    fn bare_cron_tag_keeps_a_message_that_contains_bracket_colon() {
+        let content = "Oct 20 03:00:01 host CRON: (root) CMD (/bin/backup.sh x[1]: y)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(
+            result.events[0].source,
+            EventSource::CronCmd {
+                user: "root".to_string(),
+                pid: None,
+                command: "/bin/backup.sh x[1]: y".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn leading_bom_does_not_drop_the_first_syslog_line() {
+        let content = "\u{feff}2026-10-20T03:00:01Z host CRON[1]: (root) CMD (/bin/backup.sh)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(result.events.len(), 1);
     }
 
     #[test]

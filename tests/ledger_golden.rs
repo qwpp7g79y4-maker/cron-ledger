@@ -219,6 +219,52 @@ fn log_gap_missed_only_in_covered_days() {
     );
 }
 
+#[test]
+fn interior_gap_between_first_and_last_log_line_is_missed() {
+    // A line on the 18th and a line on the 22nd. The days between sit
+    // inside [first, last], so a run with no event there is MISSED.
+    // The day before the first line and the day after the last line are
+    // outside the span and stay NO_TRACE. The span is not a list of
+    // holes: two lines make one closed range.
+    let expected: Vec<Timestamp> = (17..=23)
+        .map(|day| ts(&format!("2026-10-{day:02}T03:00:00Z")))
+        .collect();
+    let job = cron_job("root", "/bin/backup.sh", expected);
+    let events = vec![
+        cmd_event(
+            "gap.log",
+            1,
+            "2026-10-18T03:00:01Z",
+            "root",
+            "/bin/backup.sh",
+        ),
+        cmd_event(
+            "gap.log",
+            2,
+            "2026-10-22T03:00:01Z",
+            "root",
+            "/bin/backup.sh",
+        ),
+    ];
+    let ledger = build_ledger(&[job], &events);
+    let JobOutcome::Standard(outcomes) = &ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    let statuses: Vec<Status> = outcomes.iter().map(|o| o.status).collect();
+    assert_eq!(
+        statuses,
+        vec![
+            Status::NoTrace, // 17th: before the first line
+            Status::Ok,      // 18th
+            Status::Missed,  // 19th: inside the span, no event
+            Status::Missed,  // 20th
+            Status::Missed,  // 21st
+            Status::Ok,      // 22nd
+            Status::NoTrace, // 23rd: after the last line
+        ]
+    );
+}
+
 fn journal_line(ts_us: i64, extra: &str) -> String {
     format!(r#"{{"__REALTIME_TIMESTAMP":"{ts_us}",{extra}}}"#)
 }
