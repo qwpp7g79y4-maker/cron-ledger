@@ -5,7 +5,8 @@
 //!
 //! A source named explicitly on the command line (`--crontab`,
 //! `--timer-unit`, `--syslog`, ...) that cannot be read is a hard usage
-//! error (exit 2): the user asked for it by name. The `--system-root`
+//! error (exit 2): the user asked for it by name. So is a window whose
+//! schedules expand to more than 5,000,000 expected runs. The `--system-root`
 //! scan runs only when no `--crontab`, `--crontab-user`, or `--timer-unit`
 //! was given. It is best-effort: a missing path is silently skipped, and
 //! an unreadable one becomes a warning, because the default root is `/`
@@ -88,14 +89,35 @@ fn note_invalid_utf8(warnings: &mut Vec<String>, label: &str, text: &log::LogTex
     }
 }
 
+/// Most expected runs one audit will hold. Past this the ledger is about
+/// a gigabyte, so a wider window is rejected instead of growing without
+/// a bound. Exactly this many runs still audits.
+const MAX_EXPECTED_RUNS: usize = 5_000_000;
+
 struct Collector {
     jobs: Vec<ScheduledJob>,
     descriptions: HashMap<JobKey, String>,
     warnings: Vec<String>,
     events: Vec<LogEvent>,
+    /// Expected runs already accepted, across every job in this audit.
+    expected_runs: usize,
 }
 
 impl Collector {
+    /// Count `added` expected runs toward the audit-wide cap. Called
+    /// immediately after each expansion, before those runs are matched.
+    fn account_expected_runs(&mut self, source: &str, added: usize) -> Result<(), String> {
+        let total = self.expected_runs.saturating_add(added);
+        if total > MAX_EXPECTED_RUNS {
+            return Err(format!(
+                "{source}: --since/--until expands to {total} expected runs, \
+                 above the limit of {MAX_EXPECTED_RUNS}; narrow --since/--until"
+            ));
+        }
+        self.expected_runs = total;
+        Ok(())
+    }
+
     fn add_cron_job(
         &mut self,
         job: &CronJob,
@@ -103,7 +125,7 @@ impl Collector {
         since: Timestamp,
         until: Timestamp,
         tolerance: Duration,
-    ) {
+    ) -> Result<(), String> {
         let user = job.user.clone().unwrap_or_default();
         let key = JobKey::Cron {
             user,
@@ -124,6 +146,7 @@ impl Collector {
                     None => default_tz.clone(),
                 };
                 let expected = schedule::expand(s, &tz, since, until);
+                self.account_expected_runs(&format!("{}:{}", job.file, job.line), expected.len())?;
                 // The first firing at or after `until` is outside this
                 // window. The late search stops there, so that later
                 // slot's run is not reported as LATE for the last
@@ -146,6 +169,7 @@ impl Collector {
             persistent: false,
             next_after_window,
         });
+        Ok(())
     }
 
     fn add_parse_result(
@@ -155,14 +179,15 @@ impl Collector {
         since: Timestamp,
         until: Timestamp,
         tolerance: Duration,
-    ) {
+    ) -> Result<(), String> {
         for w in &result.warnings {
             self.warnings
                 .push(format!("{}:{}: {}", w.file, w.line, w.message));
         }
         for job in &result.jobs {
-            self.add_cron_job(job, default_tz, since, until, tolerance);
+            self.add_cron_job(job, default_tz, since, until, tolerance)?;
         }
+        Ok(())
     }
 
     /// Keep every description for `key`. Several crontab lines, or several
@@ -291,6 +316,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         descriptions: HashMap::new(),
         warnings: Vec::new(),
         events: Vec::new(),
+        expected_runs: 0,
     };
 
     // One closed span per input file. Syslog contributes its recognised
@@ -303,14 +329,14 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         let content = read_text(path)?;
         let label = path.label();
         let parsed = crontab::parse_system_crontab(&content, &label);
-        c.add_parse_result(parsed, &tz, since, until, tolerance);
+        c.add_parse_result(parsed, &tz, since, until, tolerance)?;
     }
 
     for (user, path) in &cli.crontab_users {
         let content = read_text(path)?;
         let label = path.label();
         let parsed = crontab::parse_user_crontab(&content, &label, Some(user));
-        c.add_parse_result(parsed, &tz, since, until, tolerance);
+        c.add_parse_result(parsed, &tz, since, until, tolerance)?;
     }
 
     // --system-root is the fallback source. A named --crontab,
@@ -329,7 +355,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                 Ok(content) => {
                     let label = etc_crontab.display().to_string();
                     let parsed = crontab::parse_system_crontab(&content, &label);
-                    c.add_parse_result(parsed, &tz, since, until, tolerance);
+                    c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                 }
                 Err(e) => c.warnings.push(format!("{}: {e}", etc_crontab.display())),
             }
@@ -360,7 +386,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                     Ok(content) => {
                         let label = file.display().to_string();
                         let parsed = crontab::parse_system_crontab(&content, &label);
-                        c.add_parse_result(parsed, &tz, since, until, tolerance);
+                        c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                     }
                     Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
                 }
@@ -381,7 +407,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                     Ok(content) => {
                         let label = file.display().to_string();
                         let parsed = crontab::parse_user_crontab(&content, &label, Some(&user));
-                        c.add_parse_result(parsed, &tz, since, until, tolerance);
+                        c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                     }
                     Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
                 }
@@ -441,6 +467,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                 match systemd::parse_calendar(cal_str) {
                     Ok(cal) => match systemd::expand_calendar(&cal, &tz, since, until) {
                         Ok(times) => {
+                            c.account_expected_runs(&label, times.len())?;
                             all_times.extend(times);
                             if let Some(t) = next_elapse(&cal) {
                                 next_after_window =
@@ -1467,6 +1494,54 @@ mod tests {
         );
         assert!(text.contains("0 MISSED"), "{text}");
         assert!(text.contains("5 NO_TRACE"), "{text}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn window_over_the_expected_run_cap_is_a_usage_error_exit_two() {
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-run-cap-over-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "* * * * * root /bin/true\n").unwrap();
+        // Every-minute job, [since, until) is 5_000_001 minutes: one past the cap.
+        let cli = Cli {
+            since: "2017-04-18T18:39:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            crontabs: vec![InputPath::File(crontab_path)],
+            ..Cli::default()
+        };
+        let err = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap_err();
+        assert!(err.contains("5000001"), "{err}");
+        assert!(err.contains("5000000"), "{err}");
+        assert!(err.contains("crontab"), "{err}");
+        assert!(err.contains("--since"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn window_at_the_expected_run_cap_still_audits() {
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-run-cap-at-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "* * * * * root /bin/true\n").unwrap();
+        // Every-minute job, [since, until) is exactly 5_000_000 minutes.
+        let cli = Cli {
+            since: "2017-04-18T18:40:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            crontabs: vec![InputPath::File(crontab_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes.len(), 5_000_000);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

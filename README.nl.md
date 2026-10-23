@@ -117,7 +117,7 @@ cron-ledger --system-root /nonexistent \
 |---|---|
 | `0` | Alles is `OK` (`REBOOT_ONLY`/`UNSUPPORTED_TRIGGER` tellen niet mee, die zijn alleen informatief). |
 | `1` | Minstens één `MISSED` of `LATE`. |
-| `2` | Gebruiks- of invoer/uitvoerfout (verkeerde opties, meer dan één stdin-bron, een expliciet opgegeven invoerbestand dat niet te lezen is, of het rapport kan niet worden geschreven). |
+| `2` | Gebruiks- of invoer/uitvoerfout (verkeerde opties, meer dan één stdin-bron, een expliciet opgegeven invoerbestand dat niet te lezen is, een `--since`/`--until`-venster waarvan de planning voorbij de limiet van verwachte runs uitdijt, of het rapport kan niet worden geschreven). |
 | `3` | Geen `MISSED`/`LATE`, maar wel minstens één `NO_TRACE`. |
 
 ## Wat het NIET doet
@@ -147,6 +147,7 @@ Elke claim in deze README wordt gedekt door een bestaande test of fixture in dez
 | `MISSED` alleen binnen het bereik van één invoerbestand, van de eerste herkende regel van dat bestand tot de laatste. Een gat binnen dat bereik zonder passende regel is `MISSED`, ook 19–21 oktober tussen een regel op de 18e en een regel op de 22e in hetzelfde bestand. Een gat tussen twee bestanden, ook niet-aansluitende `s.1` en `s.2.gz`, een gat vóór het eerste bestand of ná het laatste, een lege log, en een gat dat precies op de venstergrens tussen twee bestanden valt, zijn `NO_TRACE`. Een tijd gelijk aan de eerste of laatste regel van een bestand valt binnen dat bereik. `--json` `log_coverage` is de buitenste grens; het tekstrapport noemt elk bestandsbereik | `tests/ledger_golden.rs` (`log_gap_missed_only_in_covered_days`, `interior_gap_between_first_and_last_log_line_is_missed`, `gap_between_two_log_files_is_no_trace`, `gap_on_the_window_edge_between_two_files_is_no_trace`), `src/app.rs::non_adjacent_rotation_files_are_separate_coverage_spans`, `tests/cli_report.rs::no_trace_only_scenario_exits_three` (`tests/fixtures/report/no_trace/`) |
 | Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` is de volledige verzameling jobs. De scan van `--system-root` draait dan niet óók, zodat een bestand onder die root niet een tweede keer wordt ingepland. `--system-root` zonder die vlaggen scant die map nog steeds | `src/app.rs::explicit_crontab_is_not_counted_again_by_the_system_root_scan`, `src/app.rs::system_root_default_scan_reads_etc_crontab_cron_d_and_spool` |
 | Een `journalctl -o json`-regel die een sleutel herhaalt wordt overgeslagen met een waarschuwing en is geen bewijs: er wordt geen run vastgelegd en de regel verlengt de logdekking niet | `src/log/journal.rs` (`duplicate_message_key_is_not_evidence`, `repeated_key_in_a_journal_object_is_not_evidence`) |
+| Een `--since`/`--until`-venster is begrensd op 5.000.000 verwachte runs over de hele audit; daarboven een duidelijke exitcode 2 in plaats van onbegrensde geheugengroei | `src/app.rs::window_over_the_expected_run_cap_is_a_usage_error_exit_two`, `src/app.rs::window_at_the_expected_run_cap_still_audits` |
 
 ## Ontwikkeling
 
