@@ -1,8 +1,9 @@
 //! Parsing of `journalctl -o json` output (newline-delimited JSON, one
 //! object per entry): `SYSLOG_IDENTIFIER` cron/CRON/crond with the same
 //! `(user) CMD (cmd)` style `MESSAGE` cronie/vixie write to syslog,
-//! `_SYSTEMD_UNIT`/`UNIT` with a `Started ...` message for timer-activated
-//! services, and `_BOOT_ID` for `@reboot`'s informational boot list.
+//! a manager `Started ...` message (`SYSLOG_IDENTIFIER=systemd`) for
+//! timer-activated services, preferring `UNIT` over `_SYSTEMD_UNIT`, and
+//! `_BOOT_ID` for `@reboot`'s informational boot list.
 //! `MESSAGE` may be a JSON string, or (for non-UTF-8 output) a JSON array
 //! of byte values.
 
@@ -178,8 +179,11 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
                     line: line_no,
                 });
             }
-        } else if let Some(unit) = unit {
-            if let Some(message) = extract_string(obj.get("MESSAGE")) {
+        } else if identifier.eq_ignore_ascii_case("systemd") {
+            // Only the manager itself (not a service logging its own
+            // "Started ..." line, under its own unit, with its own
+            // identifier) gets to report that *it* started a unit.
+            if let (Some(unit), Some(message)) = (unit, extract_string(obj.get("MESSAGE"))) {
                 if message.starts_with("Started ") {
                     events.push(LogEvent {
                         timestamp,
@@ -283,6 +287,17 @@ mod tests {
     #[test]
     fn systemd_starting_message_is_not_a_run_event() {
         let content = r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"backup.service","MESSAGE":"Starting Nightly backup..."}"#;
+        let result = parse_journal_json(content, "journal.json");
+        assert_eq!(result.events, vec![]);
+    }
+
+    #[test]
+    fn a_services_own_message_starting_with_started_is_not_a_unit_start() {
+        // The service's own output, logged under its own unit and its
+        // own SYSLOG_IDENTIFIER (not "systemd"), happens to start with
+        // "Started ". Only the manager itself gets to report that it
+        // started a unit; the ledger must not read this as a trigger.
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"backup-tool","_SYSTEMD_UNIT":"backup.service","MESSAGE":"Started processing 4 files"}"#;
         let result = parse_journal_json(content, "journal.json");
         assert_eq!(result.events, vec![]);
     }

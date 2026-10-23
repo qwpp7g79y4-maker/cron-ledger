@@ -10,7 +10,10 @@ use std::path::Path;
 pub fn read_log_source(path: &Path) -> std::io::Result<String> {
     let bytes = std::fs::read(path)?;
     if path.extension().and_then(|e| e.to_str()) == Some("gz") {
-        let mut decoder = flate2::read::GzDecoder::new(&bytes[..]);
+        // MultiGzDecoder, not GzDecoder: some log rotation appends a new
+        // gzip member to an existing file rather than recompressing it,
+        // and GzDecoder reads only the first member of such a file.
+        let mut decoder = flate2::read::MultiGzDecoder::new(&bytes[..]);
         let mut out = String::new();
         decoder.read_to_string(&mut out)?;
         Ok(out)
@@ -45,6 +48,32 @@ mod tests {
         let compressed = encoder.finish().unwrap();
         std::fs::write(&path, compressed).unwrap();
         assert_eq!(read_log_source(&path).unwrap(), "archived line\n");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn gz_file_with_two_concatenated_members_decodes_both() {
+        // A plain concatenation of two independent gzip streams is a
+        // valid .gz file: some log rotation produces exactly this by
+        // appending a freshly gzipped chunk to an existing file.
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-test-gz-multi-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rotated.log.gz");
+
+        let mut first = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        first.write_all(b"first member\n").unwrap();
+        let mut combined = first.finish().unwrap();
+
+        let mut second = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        second.write_all(b"second member\n").unwrap();
+        combined.extend(second.finish().unwrap());
+
+        std::fs::write(&path, combined).unwrap();
+        assert_eq!(
+            read_log_source(&path).unwrap(),
+            "first member\nsecond member\n"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

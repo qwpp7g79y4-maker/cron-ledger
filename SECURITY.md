@@ -14,7 +14,7 @@ Please report security problems privately, not in a public issue: open the **Sec
 
 Please include:
 
-- the cron-ledger version (`cron-ledger --version`) and your operating system;
+- the cron-ledger version (the `version` field in `Cargo.toml`, or the package or commit you installed) and your operating system;
 - the exact command;
 - minimal synthetic input files that reproduce the problem, never real logs or crontabs;
 - what cron-ledger printed and what you expected.

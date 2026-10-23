@@ -55,10 +55,13 @@ pub enum ScheduleKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CronJob {
     pub schedule: ScheduleKind,
-    /// From a `TZ=` env line active at this point in the file.
+    /// From a `TZ=` env line active at this point in the file. This only
+    /// reaches the job's own environment (as cronie documents it); it has
+    /// no effect on schedule interpretation, so it is not read by
+    /// [`CronJob::effective_tz`].
     pub tz: Option<String>,
-    /// From a `CRON_TZ=` env line active at this point in the file; takes
-    /// precedence over `tz` for schedule interpretation (see
+    /// From a `CRON_TZ=` env line active at this point in the file: the
+    /// only env line that governs schedule interpretation (see
     /// [`CronJob::effective_tz`]).
     pub cron_tz: Option<String>,
     /// `None` for a per-user crontab where the user comes from the file's
@@ -72,10 +75,11 @@ pub struct CronJob {
 
 impl CronJob {
     /// The timezone that governs this job's schedule: `CRON_TZ` if set,
-    /// otherwise `TZ`, otherwise `None` (caller falls back to the system
-    /// timezone).
+    /// otherwise `None` (caller falls back to the system timezone). A
+    /// plain `TZ=` line does not affect scheduling in cronie, only the
+    /// job's own environment, so it is deliberately not consulted here.
     pub fn effective_tz(&self) -> Option<&str> {
-        self.cron_tz.as_deref().or(self.tz.as_deref())
+        self.cron_tz.as_deref()
     }
 }
 

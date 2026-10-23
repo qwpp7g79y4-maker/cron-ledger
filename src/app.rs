@@ -158,30 +158,43 @@ fn derive_service_unit(path: &InputPath) -> String {
     }
 }
 
-/// Whether `/etc/cron.d` would run this file. Debian cron accepts only
-/// names made of letters, digits, `_` and `-`; cronie additionally skips
-/// backup/package-manager leftovers such as `*.rpmsave` or `*~`. Both
-/// skip dotfiles. A file that fails this check is never run, so treating
-/// its jobs as expected would produce a false `MISSED`.
-fn cron_d_accepts_file_name(name: &str) -> bool {
-    if name.starts_with('.') {
-        return false;
+/// How `/etc/cron.d` scanning treats one file name.
+enum CronDFileName {
+    /// Both Debian cron and cronie would run it.
+    Accepted,
+    /// Skipped by cronie as well as Debian cron: a dotfile, a name
+    /// starting with `#`, a trailing `~`, or an rpm backup suffix
+    /// (`.rpmsave`, `.rpmorig`, `.rpmnew`). cronie's `not_a_crontab()`
+    /// rejects exactly these. Skip silently.
+    Ignored,
+    /// Outside Debian cron's `[A-Za-z0-9_-]` rule, but not one of the
+    /// names cronie skips. Debian cron ignores it; cronie still runs it
+    /// (including `*.dpkg-old` and other dotted names). Skip it here,
+    /// and say so.
+    AmbiguousAcrossImplementations,
+}
+
+/// Classify one `/etc/cron.d` file name. See [`CronDFileName`].
+fn classify_cron_d_file_name(name: &str) -> CronDFileName {
+    // Suffixes cronie skips. Debian's dpkg leftovers are not in this
+    // list: cronie loads `*.dpkg-old` and any other dotted name.
+    const CRONIE_SKIPPED_SUFFIXES: &[&str] = &["~", ".rpmsave", ".rpmorig", ".rpmnew"];
+    if name.starts_with('.')
+        || name.starts_with('#')
+        || CRONIE_SKIPPED_SUFFIXES
+            .iter()
+            .any(|suf| name.ends_with(suf))
+    {
+        return CronDFileName::Ignored;
     }
-    const REJECTED_SUFFIXES: &[&str] = &[
-        "~",
-        ".dpkg-old",
-        ".dpkg-dist",
-        ".dpkg-new",
-        ".dpkg-tmp",
-        ".rpmsave",
-        ".rpmorig",
-        ".rpmnew",
-    ];
-    if REJECTED_SUFFIXES.iter().any(|suf| name.ends_with(suf)) {
-        return false;
-    }
-    name.bytes()
+    if name
+        .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        CronDFileName::Accepted
+    } else {
+        CronDFileName::AmbiguousAcrossImplementations
+    }
 }
 
 fn walk_files_sorted(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -253,12 +266,21 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         let mut files = Vec::new();
         walk_files_sorted(&cron_d, &mut files);
         for file in files {
-            let accepted = file
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(cron_d_accepts_file_name);
-            if !accepted {
-                continue;
+            let name = match file.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name,
+                None => continue,
+            };
+            match classify_cron_d_file_name(name) {
+                CronDFileName::Ignored => continue,
+                CronDFileName::AmbiguousAcrossImplementations => {
+                    c.warnings.push(format!(
+                        "{}: Debian cron ignores this name; cronie may still run it, so it is \
+                         skipped here but could be an unaudited job",
+                        file.display()
+                    ));
+                    continue;
+                }
+                CronDFileName::Accepted => {}
             }
             match std::fs::read_to_string(&file) {
                 Ok(content) => {
@@ -606,6 +628,53 @@ mod tests {
                 command: "/usr/local/bin/kept.sh".to_string(),
             }]
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn etc_cron_d_scan_warns_on_a_name_only_cronie_would_run() {
+        // Debian cron only runs names of letters, digits, `_` and `-`.
+        // cronie's not_a_crontab() does not: it skips dotfiles, a leading
+        // `#`, a trailing `~`, and the rpm backup suffixes, and it runs
+        // everything else, including `my.job` and `*.dpkg-old`. Those
+        // are still skipped here, but the skip has to be visible.
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-cron-d-ambiguous-{}",
+            std::process::id()
+        ));
+        let etc_cron_d = dir.join("etc/cron.d");
+        std::fs::create_dir_all(&etc_cron_d).unwrap();
+        for name in [
+            "my.job",
+            "myjob.dpkg-old",
+            "#skip",
+            "myjob~",
+            "myjob.rpmsave",
+            ".hidden",
+        ] {
+            std::fs::write(
+                etc_cron_d.join(name),
+                "0 4 * * * root /usr/local/bin/skipped.sh\n",
+            )
+            .unwrap();
+        }
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            system_root: dir.clone(),
+            ..Cli::default()
+        };
+
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        assert!(audit.ledger.entries.is_empty());
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(warnings.contains("my.job") && warnings.contains("cronie"));
+        assert!(warnings.contains("myjob.dpkg-old"));
+        assert!(!warnings.contains("#skip"));
+        assert!(!warnings.contains("myjob~"));
+        assert!(!warnings.contains("myjob.rpmsave"));
+        assert!(!warnings.contains(".hidden"));
         std::fs::remove_dir_all(&dir).ok();
     }
 

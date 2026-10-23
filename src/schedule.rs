@@ -19,8 +19,9 @@ pub fn default_timezone() -> TimeZone {
     TimeZone::try_system().unwrap_or(TimeZone::UTC)
 }
 
-/// Resolve a timezone name (from `--tz`, `TZ=`, or `CRON_TZ=`) to a
-/// [`TimeZone`].
+/// Resolve a timezone name (from `--tz` or `CRON_TZ=`) to a [`TimeZone`].
+/// A crontab `TZ=` line is the job's own environment, not a schedule
+/// timezone, so callers do not pass it here.
 pub fn resolve_timezone(name: &str) -> Result<TimeZone, String> {
     TimeZone::get(name).map_err(|e| format!("unknown timezone '{name}': {e}"))
 }

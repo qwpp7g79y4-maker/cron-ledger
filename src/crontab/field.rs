@@ -174,11 +174,12 @@ pub fn parse_field(spec: &FieldSpec, text: &str) -> Result<Field, String> {
     if values.is_empty() {
         return Err("field produced no values".to_string());
     }
-    // A field that, after folding (dow 0==7), ends up covering every legal
-    // value is treated the same as an explicit `*` so that the vixie
-    // day-of-month/day-of-week OR rule (see [`super::model::matches_day`])
-    // can tell "unrestricted" apart from "restricted but happens to match
-    // every current value".
+    // A field that contains a literal `*` and, after folding (dow 0==7),
+    // covers every legal value is normalized to `Field::Star`. This
+    // affects display and the wildcard-hour DST check only. The
+    // day-of-month/day-of-week OR/AND rule uses `Schedule::dom_star` /
+    // `dow_star`, which the parser sets from the raw text (see
+    // [`super::model::matches_day`]).
     let full_range: std::collections::BTreeSet<u32> = if spec.fold_max_to_min {
         (spec.min..spec.max).collect()
     } else {

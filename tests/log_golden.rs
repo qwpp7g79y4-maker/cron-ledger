@@ -60,8 +60,11 @@ fn garbage_lines_are_counted_not_fatal_and_match_golden() {
     let content = std::fs::read_to_string(fixture_path("garbage.log")).unwrap();
     let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
     let result = parse_syslog_cron(&content, "garbage.log", since, &TimeZone::UTC);
+    // Two events. Two warnings: the malformed CRON body, and the CRON
+    // line whose month does not parse. The unrelated non-cron line is
+    // skipped with no warning.
     assert_eq!(result.events.len(), 2);
-    assert_eq!(result.warnings.len(), 3);
+    assert_eq!(result.warnings.len(), 2);
     assert_matches_golden("garbage", &result);
 }
 
