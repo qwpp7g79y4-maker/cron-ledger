@@ -10,5 +10,6 @@ mod syslog;
 
 pub use event::{EventSource, ExitStatus, LogEvent, LogParseResult, LogWarning};
 pub use journal::parse_journal_json;
-pub use source::read_log_source;
+pub(crate) use source::decode_log_bytes;
+pub use source::{read_log_source, LogText};
 pub use syslog::parse_syslog_cron;

@@ -65,12 +65,25 @@ fn read_text(path: &InputPath) -> Result<String, String> {
     }
 }
 
-fn read_log_text(path: &InputPath) -> Result<String, String> {
+fn read_log_text(path: &InputPath) -> Result<log::LogText, String> {
     match path {
-        InputPath::Stdin => read_text(path),
+        InputPath::Stdin => {
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
+                .map_err(|e| format!("cannot read <stdin>: {e}"))?;
+            Ok(log::decode_log_bytes(buf))
+        }
         InputPath::File(p) => {
             log::read_log_source(p).map_err(|e| format!("cannot read {}: {e}", p.display()))
         }
+    }
+}
+
+fn note_invalid_utf8(warnings: &mut Vec<String>, label: &str, text: &log::LogText) {
+    if let Some(at) = text.invalid_utf8_at {
+        warnings.push(format!(
+            "{label}: invalid UTF-8 at byte {at}; replaced so the rest of the log can be read"
+        ));
     }
 }
 
@@ -99,8 +112,8 @@ impl Collector {
             user,
             command: normalize_command(&job.command),
         };
-        let (job_schedule, description) = match &job.schedule {
-            ScheduleKind::Reboot => (JobSchedule::Reboot, "@reboot".to_string()),
+        let (job_schedule, description, next_after_window) = match &job.schedule {
+            ScheduleKind::Reboot => (JobSchedule::Reboot, "@reboot".to_string(), None),
             ScheduleKind::Standard(s) => {
                 let tz = match job.effective_tz() {
                     Some(name) => match resolve_timezone(name) {
@@ -114,7 +127,16 @@ impl Collector {
                     None => default_tz.clone(),
                 };
                 let expected = schedule::expand(s, &tz, since, until);
-                (JobSchedule::Standard(expected), describe_schedule(s))
+                // The first firing at or after `until` is outside this
+                // window. The late search stops there, so that later
+                // slot's run is not reported as LATE for the last
+                // in-window time.
+                let next_after_window = schedule::first_on_or_after(s, &tz, until);
+                (
+                    JobSchedule::Standard(expected),
+                    describe_schedule(s),
+                    next_after_window,
+                )
             }
         };
         self.merge_description(&key, description);
@@ -125,6 +147,7 @@ impl Collector {
             schedule: job_schedule,
             tolerance,
             persistent: false,
+            next_after_window,
         });
     }
 
@@ -361,6 +384,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                 schedule: JobSchedule::UnsupportedTrigger,
                 tolerance: timer_tolerance,
                 persistent: timer.persistent,
+                next_after_window: None,
             });
         } else {
             let mut all_times: Vec<Timestamp> = Vec::new();
@@ -387,6 +411,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                 schedule: JobSchedule::Standard(all_times),
                 tolerance: timer_tolerance,
                 persistent: timer.persistent,
+                next_after_window: None,
             });
         }
     }
@@ -399,9 +424,10 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     }
 
     for path in &cli.syslogs {
-        let content = read_log_text(path)?;
         let label = path.label();
-        let parsed = log::parse_syslog_cron(&content, &label, since, &tz);
+        let read = read_log_text(path)?;
+        note_invalid_utf8(&mut c.warnings, &label, &read);
+        let parsed = log::parse_syslog_cron(&read.text, &label, since, &tz);
         for w in parsed.warnings {
             c.warnings
                 .push(format!("{}:{}: {}", w.file, w.line, w.message));
@@ -412,9 +438,10 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     }
 
     for path in &cli.journal_json {
-        let content = read_log_text(path)?;
         let label = path.label();
-        let parsed = log::parse_journal_json(&content, &label);
+        let read = read_log_text(path)?;
+        note_invalid_utf8(&mut c.warnings, &label, &read);
+        let parsed = log::parse_journal_json(&read.text, &label);
         for w in parsed.warnings {
             c.warnings
                 .push(format!("{}:{}: {}", w.file, w.line, w.message));
@@ -860,6 +887,151 @@ mod tests {
             "{text}"
         );
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn daily_job_does_not_claim_the_next_days_run_outside_the_window() {
+        // One in-window firing (20 Oct 03:00). The only later run is the
+        // next day's firing, so 20 Oct is missed. Coverage includes that
+        // instant because the log also has the 19 Oct run.
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-next-day-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "0 3 * * * root /bin/job.sh\n").unwrap();
+        let syslog_path = dir.join("syslog");
+        std::fs::write(
+            &syslog_path,
+            "Oct 19 03:00:01 h CRON[1]: (root) CMD (/bin/job.sh)\n\
+             Oct 21 03:00:01 h CRON[1]: (root) CMD (/bin/job.sh)\n",
+        )
+        .unwrap();
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            syslogs: vec![InputPath::File(syslog_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Missed);
+        assert!(outcomes[0].actual.is_none());
+        assert_eq!(crate::report::exit_code(&audit.ledger), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn same_day_late_run_stays_late_when_the_next_firing_is_tomorrow() {
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-same-day-late-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "0 3 * * * root /bin/job.sh\n").unwrap();
+        let syslog_path = dir.join("syslog");
+        std::fs::write(
+            &syslog_path,
+            "Oct 20 05:00:00 h CRON[1]: (root) CMD (/bin/job.sh)\n",
+        )
+        .unwrap();
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            syslogs: vec![InputPath::File(syslog_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Late);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-20T05:00:00Z")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn irregular_cadence_keeps_a_late_run_before_the_real_next_firing() {
+        // 03:00 then 03:05. Copying the five-minute gap would stop the
+        // late search at 03:10 and call the 03:12 run missed. The next
+        // firing is the next day, so 03:12 is late for 03:05.
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-irregular-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "0,5 3 * * * root /bin/job.sh\n").unwrap();
+        let syslog_path = dir.join("syslog");
+        std::fs::write(
+            &syslog_path,
+            "Oct 20 02:00:00 h CRON[1]: (root) CMD (/bin/other.sh)\n\
+             Oct 20 03:12:00 h CRON[1]: (root) CMD (/bin/job.sh)\n",
+        )
+        .unwrap();
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-20T04:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            syslogs: vec![InputPath::File(syslog_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Missed);
+        assert_eq!(outcomes[1].status, crate::ledger::Status::Late);
+        assert_eq!(outcomes[1].actual, Some(ts("2026-10-20T03:12:00Z")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn invalid_utf8_in_a_syslog_is_a_warning_and_the_audit_continues() {
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-bad-utf8-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "0 3 * * * root /bin/job.sh\n").unwrap();
+        let syslog_path = dir.join("syslog");
+        let mut bytes = b"Oct 20 02:00:00 h CRON[9]: (root) CMD (/bin/noise".to_vec();
+        let bad_at = bytes.len();
+        bytes.push(0xff);
+        bytes.extend(b")\nOct 20 03:00:01 h CRON[1]: (root) CMD (/bin/job.sh)\n");
+        std::fs::write(&syslog_path, &bytes).unwrap();
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            syslogs: vec![InputPath::File(syslog_path.clone())],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        assert!(
+            audit
+                .extra_warnings
+                .iter()
+                .any(|w| w.contains(&format!("invalid UTF-8 at byte {bad_at}"))),
+            "{:?}",
+            audit.extra_warnings
+        );
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Ok);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-20T03:00:01Z")));
         std::fs::remove_dir_all(&dir).ok();
     }
 

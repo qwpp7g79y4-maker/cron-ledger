@@ -38,6 +38,11 @@ pub struct ScheduledJob {
     /// which have no such concept. Drives `LATE (caught up)` via
     /// [`apply_persistent_catchup`].
     pub persistent: bool,
+    /// First firing at or after the audit window, when a crontab schedule
+    /// is known. Caps the late search so a run of that later firing is not
+    /// reported as `LATE` for an in-window time. `None` for `@reboot`,
+    /// timers, and callers that only have expanded times.
+    pub next_after_window: Option<Timestamp>,
 }
 
 /// What a job's ledger entry ended up as.
@@ -209,23 +214,30 @@ pub fn build_ledger_with_coverage(
         // Tag each job's own expected times with where they came from,
         // so the merged match can be split back out per job afterwards,
         // in that job's own order.
-        let mut tagged: Vec<(Timestamp, Duration, usize, usize)> = Vec::new();
+        let mut tagged: Vec<(Timestamp, Duration, usize, usize, Option<Timestamp>)> = Vec::new();
         for &job_idx in indices {
             let JobSchedule::Standard(expected) = &jobs[job_idx].schedule else {
                 unreachable!("grouped only jobs with a Standard schedule")
             };
             for (pos, &exp) in expected.iter().enumerate() {
-                tagged.push((exp, jobs[job_idx].tolerance, job_idx, pos));
+                tagged.push((
+                    exp,
+                    jobs[job_idx].tolerance,
+                    job_idx,
+                    pos,
+                    jobs[job_idx].next_after_window,
+                ));
             }
         }
-        tagged.sort_by_key(|&(ts, _, job_idx, pos)| (ts, job_idx, pos));
+        tagged.sort_by_key(|&(ts, _, job_idx, pos, _)| (ts, job_idx, pos));
 
         let merged: Vec<(Timestamp, Duration)> =
             tagged.iter().map(|&(ts, tol, ..)| (ts, tol)).collect();
-        let merged_outcomes = match_shared_runs(&merged, &runs, &log_coverage);
+        let next_after: Vec<Option<Timestamp>> = tagged.iter().map(|&(.., cap)| cap).collect();
+        let merged_outcomes = match_shared_runs(&merged, &runs, &log_coverage, &next_after);
 
         let mut per_job: HashMap<usize, Vec<(usize, RunOutcome)>> = HashMap::new();
-        for (&(_, _, job_idx, pos), outcome) in tagged.iter().zip(merged_outcomes) {
+        for (&(_, _, job_idx, pos, _), outcome) in tagged.iter().zip(merged_outcomes) {
             per_job.entry(job_idx).or_default().push((pos, outcome));
         }
         for (job_idx, mut positioned) in per_job {

@@ -7,6 +7,8 @@
 //! so the real host's `/etc/crontab` etc. (which may or may not exist,
 //! and is outside this project's control) never leaks into the result.
 
+#[cfg(target_os = "linux")]
+use assert_cmd::prelude::CommandCargoExt;
 use assert_cmd::Command;
 use std::path::{Path, PathBuf};
 
@@ -246,4 +248,42 @@ fn help_flag_matches_golden_usage_text() {
         .assert()
         .code(0)
         .stdout(expected);
+}
+
+/// `/dev/full` exists on Linux. The other CI targets have no equivalent.
+#[cfg(target_os = "linux")]
+#[test]
+fn full_stdout_exits_with_a_write_error_instead_of_panicking() {
+    let root = empty_root();
+    let dir = fixture("ok");
+    let full = std::fs::File::options()
+        .write(true)
+        .open("/dev/full")
+        .expect("open /dev/full");
+    let output = std::process::Command::cargo_bin("cron-ledger")
+        .expect("cron-ledger binary")
+        .arg("--system-root")
+        .arg(&root)
+        .arg("--crontab")
+        .arg(dir.join("crontab"))
+        .arg("--syslog")
+        .arg(dir.join("syslog"))
+        .arg("--since")
+        .arg("2026-10-20T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-21T00:00:00Z")
+        .stdout(full)
+        .output()
+        .expect("spawn cron-ledger");
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !err.contains("panicked"),
+        "stdout write failure must not panic: {err}"
+    );
+    assert_eq!(output.status.code(), Some(2), "{err}");
+    assert!(
+        err.contains("cannot write report"),
+        "stderr should name the write failure: {err}"
+    );
+    std::fs::remove_dir_all(&root).ok();
 }

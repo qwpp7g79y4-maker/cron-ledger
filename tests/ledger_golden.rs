@@ -39,6 +39,7 @@ fn cron_job(key_user: &str, key_command: &str, expected: Vec<Timestamp>) -> Sche
         schedule: JobSchedule::Standard(expected),
         tolerance: Duration::from_secs(300),
         persistent: false,
+        next_after_window: None,
     }
 }
 
@@ -310,6 +311,7 @@ fn journal_excerpt_without_boot_evidence_does_not_catch_up_a_persistent_timer() 
         schedule: JobSchedule::Reboot,
         tolerance: Duration::from_secs(300),
         persistent: false,
+        next_after_window: None,
     };
     let timer = ScheduledJob {
         key: JobKey::Timer {
@@ -320,6 +322,7 @@ fn journal_excerpt_without_boot_evidence_does_not_catch_up_a_persistent_timer() 
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
         persistent: true,
+        next_after_window: None,
     };
     let ledger =
         build_ledger_with_coverage(&[reboot, timer], &parsed.events, parsed.coverage_timestamps);
@@ -376,6 +379,7 @@ fn kernel_banner_still_catches_up_a_persistent_timer() {
         schedule: JobSchedule::Reboot,
         tolerance: Duration::from_secs(300),
         persistent: false,
+        next_after_window: None,
     };
     let timer = ScheduledJob {
         key: JobKey::Timer {
@@ -386,6 +390,7 @@ fn kernel_banner_still_catches_up_a_persistent_timer() {
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
         persistent: true,
+        next_after_window: None,
     };
     let ledger =
         build_ledger_with_coverage(&[reboot, timer], &parsed.events, parsed.coverage_timestamps);
@@ -414,6 +419,7 @@ fn reboot_job_reports_found_boots_for_info_only() {
         schedule: JobSchedule::Reboot,
         tolerance: Duration::from_secs(300),
         persistent: false,
+        next_after_window: None,
     };
     let events = vec![
         LogEvent {
@@ -454,6 +460,7 @@ fn unsupported_trigger_timer_is_flagged_without_computation() {
         schedule: JobSchedule::UnsupportedTrigger,
         tolerance: Duration::from_secs(60),
         persistent: false,
+        next_after_window: None,
     };
     let ledger = build_ledger(&[job], &[]);
     assert_eq!(ledger.entries[0].outcome, JobOutcome::UnsupportedTrigger);
@@ -470,6 +477,7 @@ fn timer_matches_via_systemd_unit_start_events() {
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
         persistent: false,
+        next_after_window: None,
     };
     let events = vec![LogEvent {
         timestamp: ts("2026-10-20T03:00:10Z"),
@@ -500,6 +508,7 @@ fn persistent_timer_missed_run_is_caught_up_late_via_boot_event() {
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
         persistent: true,
+        next_after_window: None,
     };
     let events = vec![
         // An unrelated event, only so the log coverage window includes
@@ -550,6 +559,7 @@ fn non_persistent_timer_missed_run_after_boot_stays_missed() {
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
         persistent: false,
+        next_after_window: None,
     };
     let events = vec![
         LogEvent {
@@ -663,6 +673,7 @@ fn end_to_end_crontab_and_syslog_matches_golden() {
                 schedule: JobSchedule::Standard(expected),
                 tolerance: Duration::from_secs(300),
                 persistent: false,
+                next_after_window: None,
             }
         })
         .collect();

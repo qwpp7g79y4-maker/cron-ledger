@@ -167,6 +167,26 @@ fn push_gap_hits(tz: &TimeZone, gap_hits: Vec<Timestamp>, out: &mut Vec<Timestam
     }
 }
 
+/// First expected instant at or after `at`. The audit window is
+/// `[since, until)`, so `at = until` is the first firing the window
+/// itself does not contain. `None` when nothing fires within eight
+/// years (enough for a 29 February schedule). The window widens so an
+/// every-minute schedule does not materialise years of instants.
+pub fn first_on_or_after(schedule: &Schedule, tz: &TimeZone, at: Timestamp) -> Option<Timestamp> {
+    // Seconds, not calendar days: a `Timestamp` rejects a span whose
+    // units are not fixed-length.
+    let mut span_days: i64 = 2;
+    for _ in 0..12 {
+        let secs = span_days.saturating_mul(24 * 60 * 60);
+        let horizon = at.checked_add(jiff::Span::new().seconds(secs)).ok()?;
+        if let Some(t) = expand(schedule, tz, at, horizon).into_iter().next() {
+            return Some(t);
+        }
+        span_days = span_days.saturating_mul(2);
+    }
+    None
+}
+
 /// Convenience: `expand`, but returning [`Zoned`] values in `tz` for
 /// display.
 pub fn expand_zoned(
@@ -405,6 +425,20 @@ mod tests {
                     dow_star,
                 },
             )
+    }
+
+    #[test]
+    fn first_on_or_after_is_the_firing_the_half_open_window_excludes() {
+        let tz = TimeZone::UTC;
+        let schedule = schedule_of("0 3 * * * /bin/job.sh\n");
+        let at: Timestamp = "2026-10-21T00:00:00Z".parse().unwrap();
+        assert_eq!(
+            first_on_or_after(&schedule, &tz, at),
+            Some("2026-10-21T03:00:00Z".parse().unwrap())
+        );
+        // A firing exactly at `at` belongs to the next window, not this one.
+        let at_hit: Timestamp = "2026-10-21T03:00:00Z".parse().unwrap();
+        assert_eq!(first_on_or_after(&schedule, &tz, at_hit), Some(at_hit));
     }
 
     proptest::proptest! {

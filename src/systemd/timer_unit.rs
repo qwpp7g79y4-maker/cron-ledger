@@ -336,6 +336,24 @@ OnUnitActiveSec=1h
     }
 
     #[test]
+    fn tolerance_past_i64_seconds_parses_without_panicking() {
+        // `--tolerance` values at 2^63 seconds used to reach the matcher
+        // and overflow the search window. Parsing must hand back a duration
+        // at least that large (f64 rounding may nudge the exact integer).
+        for text in ["9223372036854775807s", "9223372036854775808s"] {
+            let got = parse_duration(text).unwrap_or_else(|e| panic!("{text}: {e}"));
+            assert!(
+                got.as_secs() >= i64::MAX as u64,
+                "{text} -> {}s",
+                got.as_secs()
+            );
+        }
+        // u64::MAX seconds is not representable as f64 (it rounds to 2^64)
+        // and is rejected rather than wrapped.
+        assert!(parse_duration("18446744073709551615s").is_err());
+    }
+
+    #[test]
     fn duration_parsing_units() {
         assert_eq!(parse_duration("5").unwrap(), Duration::from_secs(5));
         assert_eq!(parse_duration("5min").unwrap(), Duration::from_secs(300));

@@ -14,11 +14,14 @@
 //!    claimed by this one. The chronologically last expected time has no
 //!    "next" one to bound it this way, so it reuses the spacing to the
 //!    *previous* expected time instead (same cadence assumed). A single
-//!    expected time stays unbounded. A cap of a few tolerances would
-//!    detach a systemd `Persistent=` catch-up that lands hours later;
-//!    that observed start has to stay matched so the catch-up can keep
-//!    its real timestamp. There is no one cap that both does that and
-//!    rejects the next occurrence of a schedule whose period is unknown.
+//!    expected time has no previous gap. When the caller passes the next
+//!    firing of that schedule, including one outside the audit window,
+//!    the late search stops there: the later slot's run is not claimed,
+//!    and a short copied gap is not used in place of the real next
+//!    firing. Without that hint a single expected time stays unbounded.
+//!    A cap of a few tolerances would detach a systemd `Persistent=`
+//!    catch-up that lands hours later; that observed start has to stay
+//!    matched so the catch-up can keep its real timestamp.
 //!
 //! What's left over is `MISSED` (inside the log's coverage window) or
 //! `NO_TRACE` (outside it).
@@ -83,6 +86,45 @@ fn abs_diff_secs(a: Timestamp, b: Timestamp) -> i64 {
     (a.as_second() - b.as_second()).abs()
 }
 
+/// Largest second-count that still fits in `i64`. A tolerance past this
+/// already covers every timestamp difference `abs_diff_secs` can return,
+/// so clamping here is the tolerance, not a narrower one. Casting with
+/// `as i64` would wrap `2^63` seconds to a negative bound and then
+/// overflow the window arithmetic.
+fn tolerance_limit_secs(tol: Duration) -> i64 {
+    i64::try_from(tol.as_secs()).unwrap_or(i64::MAX)
+}
+
+fn within_tolerance(diff_secs: i64, tol: Duration) -> bool {
+    diff_secs <= tolerance_limit_secs(tol)
+}
+
+/// Upper bound of the pass-2 late search for `expected[index]`.
+///
+/// The next in-window expected time always wins, tightened by this
+/// entry's own next firing when the caller knows it. The last expected
+/// time uses that next firing when present, and otherwise copies the gap
+/// back to the previous expected time. A lone expected time with no hint
+/// stays unbounded (`None`).
+fn late_upper_bound(
+    expected: &[(Timestamp, Duration)],
+    index: usize,
+    next_after: &[Option<Timestamp>],
+) -> Option<Timestamp> {
+    let own = next_after.get(index).copied().flatten();
+    if let Some(&(next, _)) = expected.get(index + 1) {
+        return Some(own.map_or(next, |bound| next.min(bound)));
+    }
+    if let Some(bound) = own {
+        return Some(bound);
+    }
+    let exp = expected[index].0;
+    index.checked_sub(1).and_then(|prev| {
+        let cap_secs = exp.as_second().saturating_sub(expected[prev].0.as_second());
+        Timestamp::from_second(exp.as_second().saturating_add(cap_secs.max(1))).ok()
+    })
+}
+
 /// Match `expected` (sorted, strictly increasing) against `runs` (sorted
 /// by timestamp; this job's own observed run instants with whatever exit
 /// status evidence was found for each), within `tolerance`, reporting
@@ -94,7 +136,7 @@ pub fn match_runs(
     coverage: &LogCoverage,
 ) -> Vec<RunOutcome> {
     let tagged: Vec<(Timestamp, Duration)> = expected.iter().map(|&exp| (exp, tolerance)).collect();
-    match_shared_runs(&tagged, runs, coverage)
+    match_shared_runs(&tagged, runs, coverage, &[])
 }
 
 /// Like [`match_runs`], but each expected time carries its own
@@ -110,7 +152,9 @@ pub fn match_shared_runs(
     expected: &[(Timestamp, Duration)],
     runs: &[(Timestamp, ExitStatus)],
     coverage: &LogCoverage,
+    next_after: &[Option<Timestamp>],
 ) -> Vec<RunOutcome> {
+    debug_assert!(next_after.is_empty() || next_after.len() == expected.len());
     let mut used = vec![false; runs.len()];
     let mut matched: Vec<Option<usize>> = vec![None; expected.len()];
 
@@ -118,10 +162,15 @@ pub fn match_shared_runs(
     // narrow to the window `[exp - tolerance, exp + tolerance]` first
     // instead of scanning every run.
     for (i, &(exp, tol)) in expected.iter().enumerate() {
-        let tolerance_secs = tol.as_secs() as i64;
+        let limit = tolerance_limit_secs(tol);
         let exp_secs = exp.as_second();
-        let start = runs.partition_point(|&(ts, _)| ts.as_second() < exp_secs - tolerance_secs);
-        let end = runs.partition_point(|&(ts, _)| ts.as_second() <= exp_secs + tolerance_secs);
+        // Saturate: `exp ± limit` overflows `i64` when the tolerance is
+        // anywhere near `2^63` seconds, which is a panic in debug and a
+        // wrapped, effectively negative window in release.
+        let lower = exp_secs.saturating_sub(limit);
+        let upper = exp_secs.saturating_add(limit);
+        let start = runs.partition_point(|&(ts, _)| ts.as_second() < lower);
+        let end = runs.partition_point(|&(ts, _)| ts.as_second() <= upper);
         let mut best: Option<(usize, i64)> = None;
         for j in start..end {
             if used[j] {
@@ -149,13 +198,7 @@ pub fn match_shared_runs(
             continue;
         }
         let (exp, _) = expected[i];
-        let upper_bound = match expected.get(i + 1) {
-            Some(&(next, _)) => Some(next),
-            None => i.checked_sub(1).and_then(|p| {
-                let cap_secs = exp.as_second().saturating_sub(expected[p].0.as_second());
-                Timestamp::from_second(exp.as_second().saturating_add(cap_secs.max(1))).ok()
-            }),
-        };
+        let upper_bound = late_upper_bound(expected, i, next_after);
         let start = runs.partition_point(|&(ts, _)| ts <= exp);
         let end = match upper_bound {
             Some(next) => runs.partition_point(|&(ts, _)| ts < next),
@@ -174,7 +217,7 @@ pub fn match_shared_runs(
             Some(j) => {
                 let (ts, exit_status) = runs[j];
                 let diff = abs_diff_secs(exp, ts);
-                if diff <= tol.as_secs() as i64 {
+                if within_tolerance(diff, tol) {
                     RunOutcome {
                         expected: exp,
                         status: Status::Ok,
@@ -449,18 +492,84 @@ mod tests {
 
     #[test]
     fn single_expected_time_late_search_stays_unbounded() {
-        // One expected time has no previous spacing to copy. Capping it
-        // at a multiple of the tolerance would turn this 2h-late run
-        // into MISSED, and the same cap would drop the hours-later
-        // Persistent= catch-up in
+        // One expected time has no previous gap to copy, and this call
+        // passes no next-firing hint. Capping it at a multiple of the
+        // tolerance would turn this 2h-late run into MISSED, and the
+        // same cap would drop the hours-later Persistent= catch-up in
         // `persistent_catchup_preserves_a_real_late_run_as_the_actual`.
-        // The search stays unbounded on purpose.
+        // Without a hint the search stays unbounded on purpose. The
+        // schedule layer passes the real next firing so a later slot's
+        // run is not claimed; see
+        // `single_expected_time_does_not_claim_the_next_firing`.
         let expected = vec![ts("2026-10-20T03:00:00Z")];
         let runs = vec![(ts("2026-10-20T05:00:00Z"), ExitStatus::Unknown)]; // 2h later
         let cov = coverage("2026-10-20T00:00:00Z", "2026-10-21T00:00:00Z");
         let got = match_runs(&expected, &runs, Duration::from_secs(300), &cov);
         assert_eq!(got[0].status, Status::Late);
         assert_eq!(got[0].actual, Some(ts("2026-10-20T05:00:00Z")));
+    }
+
+    #[test]
+    fn tolerance_of_two_to_the_63_seconds_stays_ok_and_does_not_panic() {
+        // 1s after the expected time. A tolerance of 2^63 seconds (and
+        // one past that, which does not fit in i64) used to panic in
+        // debug and come back LATE in release, because the window
+        // subtraction overflowed.
+        let expected = vec![ts("2026-10-20T03:00:00Z")];
+        let runs = vec![(ts("2026-10-20T03:00:01Z"), ExitStatus::Unknown)];
+        let cov = coverage("2026-10-20T00:00:00Z", "2026-10-21T00:00:00Z");
+        for secs in [1u64 << 63, u64::MAX] {
+            let got = match_runs(&expected, &runs, Duration::from_secs(secs), &cov);
+            assert_eq!(got[0].status, Status::Ok, "tolerance {secs}");
+            assert_eq!(got[0].actual, Some(ts("2026-10-20T03:00:01Z")));
+        }
+    }
+
+    #[test]
+    fn single_expected_time_does_not_claim_the_next_firing() {
+        // The only in-window time is 03:00 on the 20th. The run on the
+        // 21st is that schedule's next firing, so it is not evidence
+        // that the 20th ran late. A 2h-late run the same day still is.
+        let expected = vec![(ts("2026-10-20T03:00:00Z"), Duration::from_secs(300))];
+        let cov = coverage("2026-10-19T03:00:01Z", "2026-10-21T03:00:01Z");
+        let next = vec![Some(ts("2026-10-21T03:00:00Z"))];
+
+        let missed = match_shared_runs(
+            &expected,
+            &[(ts("2026-10-21T03:00:01Z"), ExitStatus::Unknown)],
+            &cov,
+            &next,
+        );
+        assert_eq!(missed[0].status, Status::Missed);
+        assert!(missed[0].actual.is_none());
+
+        let late = match_shared_runs(
+            &expected,
+            &[(ts("2026-10-20T05:00:00Z"), ExitStatus::Unknown)],
+            &cov,
+            &next,
+        );
+        assert_eq!(late[0].status, Status::Late);
+        assert_eq!(late[0].actual, Some(ts("2026-10-20T05:00:00Z")));
+    }
+
+    #[test]
+    fn short_previous_gap_does_not_hide_a_late_run_before_the_real_next_firing() {
+        // 03:00 then 03:05. Copying the 5-minute gap would stop the late
+        // search at 03:10 and call a 03:12 run MISSED. The real next
+        // firing is the next day, so 03:12 is LATE for 03:05 and does
+        // not belong to 03:00.
+        let expected = vec![
+            (ts("2026-10-20T03:00:00Z"), Duration::from_secs(300)),
+            (ts("2026-10-20T03:05:00Z"), Duration::from_secs(300)),
+        ];
+        let runs = vec![(ts("2026-10-20T03:12:00Z"), ExitStatus::Unknown)];
+        let cov = coverage("2026-10-20T02:00:00Z", "2026-10-20T04:00:00Z");
+        let next_day = Some(ts("2026-10-21T03:00:00Z"));
+        let got = match_shared_runs(&expected, &runs, &cov, &[next_day, next_day]);
+        assert_eq!(got[0].status, Status::Missed);
+        assert_eq!(got[1].status, Status::Late);
+        assert_eq!(got[1].actual, Some(ts("2026-10-20T03:12:00Z")));
     }
 
     /// The pre-optimization reference implementation: identical matching
@@ -472,19 +581,19 @@ mod tests {
         expected: &[(Timestamp, Duration)],
         runs: &[(Timestamp, ExitStatus)],
         coverage: &LogCoverage,
+        next_after: &[Option<Timestamp>],
     ) -> Vec<RunOutcome> {
         let mut used = vec![false; runs.len()];
         let mut matched: Vec<Option<usize>> = vec![None; expected.len()];
 
         for (i, &(exp, tol)) in expected.iter().enumerate() {
-            let tolerance_secs = tol.as_secs() as i64;
             let mut best: Option<(usize, i64)> = None;
             for (j, &(ts, _)) in runs.iter().enumerate() {
                 if used[j] {
                     continue;
                 }
                 let diff = abs_diff_secs(exp, ts);
-                if diff <= tolerance_secs && best.is_none_or(|(_, bd)| diff < bd) {
+                if within_tolerance(diff, tol) && best.is_none_or(|(_, bd)| diff < bd) {
                     best = Some((j, diff));
                 }
             }
@@ -499,13 +608,7 @@ mod tests {
                 continue;
             }
             let (exp, _) = expected[i];
-            let upper_bound = match expected.get(i + 1) {
-                Some(&(next, _)) => Some(next),
-                None => i.checked_sub(1).and_then(|p| {
-                    let cap_secs = exp.as_second().saturating_sub(expected[p].0.as_second());
-                    Timestamp::from_second(exp.as_second().saturating_add(cap_secs.max(1))).ok()
-                }),
-            };
+            let upper_bound = late_upper_bound(expected, i, next_after);
             let mut best: Option<(usize, i64)> = None;
             for (j, &(ts, _)) in runs.iter().enumerate() {
                 if used[j] || ts <= exp {
@@ -532,7 +635,7 @@ mod tests {
                 Some(j) => {
                     let (ts, exit_status) = runs[j];
                     let diff = abs_diff_secs(exp, ts);
-                    if diff <= tol.as_secs() as i64 {
+                    if within_tolerance(diff, tol) {
                         RunOutcome {
                             expected: exp,
                             status: Status::Ok,
@@ -616,8 +719,8 @@ mod tests {
             runs in arb_runs(),
         ) {
             let cov = coverage("2026-10-19T00:00:00Z", "2026-10-23T00:00:00Z");
-            let optimized = match_shared_runs(&expected, &runs, &cov);
-            let naive = naive_match_shared_runs(&expected, &runs, &cov);
+            let optimized = match_shared_runs(&expected, &runs, &cov, &[]);
+            let naive = naive_match_shared_runs(&expected, &runs, &cov, &[]);
             proptest::prop_assert_eq!(optimized, naive);
         }
     }

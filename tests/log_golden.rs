@@ -98,7 +98,7 @@ fn journal_json_matches_golden() {
 
 #[test]
 fn explicit_gz_rotation_is_decompressed_and_parsed() {
-    let content = read_log_source(&fixture_path("syslog.2.gz")).unwrap();
+    let content = read_log_source(&fixture_path("syslog.2.gz")).unwrap().text;
     let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
     let result = parse_syslog_cron(&content, "syslog.2.gz", since, &TimeZone::UTC);
     assert_eq!(result.warnings, vec![]);

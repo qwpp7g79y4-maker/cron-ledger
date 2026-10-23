@@ -1,6 +1,20 @@
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 
 use cron_ledger::{app, cli, report};
+
+/// Write the whole report. `print!` / `println!` panic when this fails
+/// (a full disk, for example), which exits 101. A failed report is an
+/// ordinary error instead.
+fn write_stdout(text: &str) -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    out.write_all(text.as_bytes())?;
+    out.flush()
+}
+
+fn report_write_error(err: io::Error) -> ! {
+    eprintln!("cron-ledger: cannot write report: {err}");
+    std::process::exit(2);
+}
 
 fn main() {
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
@@ -13,7 +27,9 @@ fn main() {
     };
 
     if parsed.help {
-        print!("{}", cli::usage());
+        if let Err(e) = write_stdout(cli::usage()) {
+            report_write_error(e);
+        }
         return;
     }
 
@@ -36,13 +52,18 @@ fn main() {
     };
     let code = report::exit_code(&audit.ledger);
 
-    if parsed.json {
-        println!("{}", report::render_json(&audit.ledger, &ctx));
+    let rendered = if parsed.json {
+        let mut text = report::render_json(&audit.ledger, &ctx);
+        text.push('\n');
+        text
     } else {
         let no_color_set = std::env::var_os("NO_COLOR").is_some();
-        let is_tty = std::io::stdout().is_terminal();
+        let is_tty = io::stdout().is_terminal();
         let color = report::use_color(no_color_set, is_tty);
-        print!("{}", report::render_text(&audit.ledger, &ctx, color));
+        report::render_text(&audit.ledger, &ctx, color)
+    };
+    if let Err(e) = write_stdout(&rendered) {
+        report_write_error(e);
     }
 
     std::process::exit(code);

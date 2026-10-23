@@ -115,7 +115,7 @@ cron-ledger --system-root /nonexistent \
 |---|---|
 | `0` | Alles is `OK` (`REBOOT_ONLY`/`UNSUPPORTED_TRIGGER` tellen niet mee, die zijn alleen informatief). |
 | `1` | Minstens één `MISSED` of `LATE`. |
-| `2` | Gebruiks- of parseerfout (verkeerde opties, meer dan één stdin-bron, een expliciet opgegeven invoerbestand dat niet te lezen is). |
+| `2` | Gebruiks- of invoer/uitvoerfout (verkeerde opties, meer dan één stdin-bron, een expliciet opgegeven invoerbestand dat niet te lezen is, of het rapport kan niet worden geschreven). |
 | `3` | Geen `MISSED`/`LATE`, maar wel minstens één `NO_TRACE`. |
 
 ## Wat het NIET doet
