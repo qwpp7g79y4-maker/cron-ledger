@@ -66,6 +66,13 @@ fn parse_cron_message(msg: &str) -> Option<(String, String, String)> {
     Some((user, action.to_string(), arg.to_string()))
 }
 
+/// Debian/Ubuntu's cron writes a PAM session line for every run, tagged
+/// as cron but with no `(user) ACTION (arg)` body: `pam_unix(cron:session):
+/// session opened/closed for user ...`. Real traffic, not a malformed line.
+fn is_pam_session_message(message: &str) -> bool {
+    message.starts_with("pam_unix(cron:session):")
+}
+
 /// Parse `journalctl -o json` NDJSON output into [`LogEvent`]s.
 pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
     let mut events = Vec::new();
@@ -123,16 +130,22 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
             .get("SYSLOG_IDENTIFIER")
             .and_then(|v| v.as_str())
             .unwrap_or("");
+        // A real PID 1 message about a unit carries both fields:
+        // `_SYSTEMD_UNIT` is the journal's own unit (`init.scope` for PID
+        // 1), `UNIT` is the unit the message is about. Prefer `UNIT`.
         let unit = obj
-            .get("_SYSTEMD_UNIT")
+            .get("UNIT")
             .and_then(|v| v.as_str())
-            .or_else(|| obj.get("UNIT").and_then(|v| v.as_str()));
+            .or_else(|| obj.get("_SYSTEMD_UNIT").and_then(|v| v.as_str()));
 
         if identifier.eq_ignore_ascii_case("cron") || identifier.eq_ignore_ascii_case("crond") {
             let Some(message) = extract_string(obj.get("MESSAGE")) else {
                 warn(&mut warnings, file, line_no, "cron entry has no MESSAGE");
                 continue;
             };
+            if is_pam_session_message(&message) {
+                continue;
+            }
             let Some((user, action, arg)) = parse_cron_message(&message) else {
                 warn(
                     &mut warnings,
@@ -251,6 +264,23 @@ mod tests {
     }
 
     #[test]
+    fn real_pid1_message_prefers_unit_over_underscore_systemd_unit() {
+        // Real `journalctl -o json` output from PID 1 about a unit carries
+        // both fields: `_SYSTEMD_UNIT=init.scope` (the journal's own unit,
+        // since PID 1 logs under init.scope) and `UNIT=<name>.service`
+        // (the unit the message is about).
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"init.scope","UNIT":"backup.service","MESSAGE":"Started Nightly backup."}"#;
+        let result = parse_journal_json(content, "journal.json");
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(
+            result.events[0].source,
+            EventSource::SystemdUnitStart {
+                unit: "backup.service".to_string()
+            }
+        );
+    }
+
+    #[test]
     fn systemd_starting_message_is_not_a_run_event() {
         let content = r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"backup.service","MESSAGE":"Starting Nightly backup..."}"#;
         let result = parse_journal_json(content, "journal.json");
@@ -270,6 +300,18 @@ mod tests {
             .filter(|e| matches!(e.source, EventSource::Boot { .. }))
             .collect();
         assert_eq!(boots.len(), 1);
+    }
+
+    #[test]
+    fn pam_session_lines_are_skipped_not_a_warning() {
+        let content = "\
+{\"__REALTIME_TIMESTAMP\":\"1792897200000000\",\"SYSLOG_IDENTIFIER\":\"CRON\",\"MESSAGE\":\"pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)\"}
+{\"__REALTIME_TIMESTAMP\":\"1792897201000000\",\"SYSLOG_IDENTIFIER\":\"CROND\",\"MESSAGE\":\"(root) CMD (backup.sh)\"}
+{\"__REALTIME_TIMESTAMP\":\"1792897202000000\",\"SYSLOG_IDENTIFIER\":\"CRON\",\"MESSAGE\":\"pam_unix(cron:session): session closed for user root\"}
+";
+        let result = parse_journal_json(content, "journal.json");
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(result.warnings, vec![]);
     }
 
     #[test]

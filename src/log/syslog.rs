@@ -5,7 +5,7 @@
 //! framing are supported.
 
 use super::event::{EventSource, LogEvent, LogParseResult, LogWarning};
-use jiff::civil::Date;
+use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
 
@@ -44,8 +44,7 @@ impl<'a> YearInference<'a> {
     }
 
     fn build(&self, year: i16, month: i8, day: i8, h: i8, m: i8, s: i8) -> Option<Timestamp> {
-        let date = Date::new(year, month, day).ok()?;
-        let civil = date.at(h, m, s, 0);
+        let civil = DateTime::new(year, month, day, h, m, s, 0).ok()?;
         civil.to_zoned(self.tz.clone()).ok().map(|z| z.timestamp())
     }
 
@@ -153,8 +152,18 @@ enum Outcome {
     Garbage(String),
 }
 
+/// Debian/Ubuntu's cron writes a PAM session line for every run, tagged
+/// as cron but with no `(user) ACTION (arg)` body: `pam_unix(cron:session):
+/// session opened/closed for user ...`. Real traffic, not a malformed line.
+fn is_pam_session_message(message: &str) -> bool {
+    message.starts_with("pam_unix(cron:session):")
+}
+
 fn classify(name: &str, pid: Option<u32>, message: &str) -> Outcome {
     if !is_cron_tag(name) {
+        return Outcome::Skip;
+    }
+    if is_pam_session_message(message) {
         return Outcome::Skip;
     }
     let Some((user, action, arg)) = parse_cron_message(message) else {
@@ -494,5 +503,38 @@ Jan  1 00:01:00 host CRON[2]: (alice) CMD (x)
                 command: "date +\\%F".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn out_of_range_hour_is_a_warning_not_a_panic() {
+        let content = "Oct 20 25:00:00 host CRON[1]: (alice) CMD (x)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.events, vec![]);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].line, 1);
+    }
+
+    #[test]
+    fn leap_second_is_a_warning_not_a_panic() {
+        let content = "Oct 20 23:59:60 host CRON[1]: (alice) CMD (x)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.events, vec![]);
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].line, 1);
+    }
+
+    #[test]
+    fn pam_session_lines_are_skipped_not_garbage() {
+        let content = "\
+Oct 20 03:00:00 host CRON[1]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+Oct 20 03:00:01 host CRON[1]: (root) CMD (backup.sh)
+Oct 20 03:00:02 host CRON[1]: pam_unix(cron:session): session closed for user root
+";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(result.warnings, vec![]);
     }
 }
