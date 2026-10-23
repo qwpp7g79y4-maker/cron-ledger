@@ -69,6 +69,19 @@ fn garbage_lines_are_counted_not_fatal_and_match_golden() {
 }
 
 #[test]
+fn rsyslog_fileformat_matches_golden() {
+    let content = std::fs::read_to_string(fixture_path("rsyslog-fileformat.log")).unwrap();
+    let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+    let result = parse_syslog_cron(&content, "rsyslog-fileformat.log", since, &TimeZone::UTC);
+    // Two high-precision cron lines (offset and Z) plus the RFC3164
+    // line. The bad offset is a warning. The sshd line is skipped.
+    assert_eq!(result.events.len(), 3);
+    assert_eq!(result.warnings.len(), 1);
+    assert_eq!(result.warnings[0].line, 3);
+    assert_matches_golden("rsyslog_fileformat", &result);
+}
+
+#[test]
 fn rfc5424_matches_golden() {
     let content = std::fs::read_to_string(fixture_path("rfc5424.log")).unwrap();
     let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();

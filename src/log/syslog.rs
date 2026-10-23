@@ -1,8 +1,9 @@
 //! Parsing of syslog-style cron logs: Debian's `/var/log/syslog`
 //! (`CRON[pid]: (user) CMD (cmd)`) and RHEL/cronie's `/var/log/cron`
-//! (`CROND[pid]: (user) CMD (cmd)`, plus `CMDOUT`/`CMDEND`). Both RFC3164
-//! (`Mon DD HH:MM:SS`, no year) and RFC5424 (full ISO8601 timestamp)
-//! framing are supported.
+//! (`CROND[pid]: (user) CMD (cmd)`, plus `CMDOUT`/`CMDEND`). RFC3164
+//! (`Mon DD HH:MM:SS`, no year), RFC5424 (a leading `<PRI>` and a full
+//! timestamp), and rsyslog's high-precision file format (a leading
+//! RFC3339 timestamp, no priority) are all supported.
 
 use super::event::{EventSource, LogEvent, LogParseResult, LogWarning};
 use jiff::civil::DateTime;
@@ -244,14 +245,94 @@ fn try_rfc5424(
     }
 }
 
+/// `YYYY-MM-DDTHH:MM:SS` at the start of the first token. The rest of an
+/// RFC3339 timestamp (fraction, `Z`, or a numeric offset) may be missing
+/// or malformed; a recognised cron line with a bad timestamp still warns.
+fn looks_like_leading_rfc3339(line: &str) -> bool {
+    let token = line.split_whitespace().next().unwrap_or("");
+    let b = token.as_bytes();
+    if b.len() < 19 {
+        return false;
+    }
+    let digit = |i: usize| b[i].is_ascii_digit();
+    digit(0)
+        && digit(1)
+        && digit(2)
+        && digit(3)
+        && b[4] == b'-'
+        && digit(5)
+        && digit(6)
+        && b[7] == b'-'
+        && digit(8)
+        && digit(9)
+        && (b[10] == b'T' || b[10] == b't')
+        && digit(11)
+        && digit(12)
+        && b[13] == b':'
+        && digit(14)
+        && digit(15)
+        && b[16] == b':'
+        && digit(17)
+        && digit(18)
+}
+
+/// rsyslog's `RSYSLOG_FileFormat`: one RFC3339 timestamp, the hostname,
+/// then `TAG[pid]: message`, with no `<PRI>`. Debian made this the
+/// default in rsyslog 8.2210.0-3 (November 2022). Ubuntu 22.04 still
+/// forces the traditional format in `rsyslog.conf`.
+/// The timestamp is one token, so the RFC3164 four-field split does not
+/// apply. A non-cron line is skipped. A cron line whose timestamp does
+/// not parse is a warning, same as a bad RFC3164 timestamp.
+fn parse_leading_rfc3339(
+    line: &str,
+    file: &str,
+    line_no: usize,
+    events: &mut Vec<LogEvent>,
+    warnings: &mut Vec<LogWarning>,
+) {
+    let Some((fields, rest)) = split_ws_fields(line, 2) else {
+        return;
+    };
+    let Some((tag, message)) = split_tag(rest) else {
+        return;
+    };
+    let (name, pid) = parse_tag(tag);
+    let outcome = classify(name, pid, message);
+    if matches!(outcome, Outcome::Skip) {
+        return;
+    }
+    let timestamp = match fields[0].parse::<Timestamp>() {
+        Ok(ts) => ts,
+        Err(e) => {
+            warn(
+                warnings,
+                file,
+                line_no,
+                format!("bad RFC3339 timestamp: {e}"),
+            );
+            return;
+        }
+    };
+    match outcome {
+        Outcome::Event(source) => events.push(LogEvent {
+            timestamp,
+            source,
+            file: file.to_string(),
+            line: line_no,
+        }),
+        Outcome::Garbage(reason) => warn(warnings, file, line_no, reason),
+        Outcome::Skip => {}
+    }
+}
+
 /// Parse a syslog-format cron log: every `CRON`/`CROND` `CMD`/`CMDOUT`/
 /// `CMDEND` line becomes a [`LogEvent`]; unrelated syslog lines are
 /// skipped silently; lines that look like a cron entry but are malformed
 /// are counted as warnings, never fatal.
 ///
 /// `since` and `tz` seed the RFC3164 year inference (RFC3164 timestamps
-/// carry no year); RFC5424 lines carry their own full timestamp and do not
-/// need either.
+/// carry no year). RFC5424 lines and rsyslog's high-precision file format
+/// carry their own timestamp and do not need either.
 pub fn parse_syslog_cron(
     content: &str,
     file: &str,
@@ -278,6 +359,15 @@ pub fn parse_syslog_cron(
                     line: line_no,
                 });
             }
+            continue;
+        }
+
+        // rsyslog high-precision lines lead with one RFC3339 token.
+        // Detect that before the RFC3164 split, which would otherwise
+        // consume the timestamp, the host, the tag, and the user, and
+        // then drop the line because the remainder has no ": ".
+        if looks_like_leading_rfc3339(line) {
+            parse_leading_rfc3339(line, file, line_no, &mut events, &mut warnings);
             continue;
         }
 
@@ -360,7 +450,11 @@ pub fn parse_syslog_cron(
         }
     }
 
-    LogParseResult { events, warnings }
+    LogParseResult {
+        events,
+        warnings,
+        coverage_timestamps: Vec::new(),
+    }
 }
 
 #[cfg(test)]
@@ -569,6 +663,86 @@ Oct 20 03:00:01 web1 CRON[5]: (alice) CMD (echo ok)
                 command: "echo ok".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn rsyslog_fileformat_rfc3339_line_is_a_cron_event() {
+        let content = "2026-10-20T03:00:01.123456+02:00 host CRON[1]: (root) CMD (x)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(result.events.len(), 1, "high-precision line was dropped");
+        assert_eq!(
+            result.events[0].timestamp.to_string(),
+            "2026-10-20T01:00:01.123456Z"
+        );
+        assert_eq!(
+            result.events[0].source,
+            EventSource::CronCmd {
+                user: "root".to_string(),
+                pid: Some(1),
+                command: "x".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rsyslog_fileformat_zulu_timestamp_is_a_cron_event() {
+        let content = "2026-10-20T01:00:01.123456Z host CROND[7]: (root) CMD (x)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(
+            result.events.len(),
+            1,
+            "Zulu high-precision line was dropped"
+        );
+        assert_eq!(
+            result.events[0].timestamp.to_string(),
+            "2026-10-20T01:00:01.123456Z"
+        );
+    }
+
+    #[test]
+    fn malformed_rfc3339_cron_line_warns_instead_of_vanishing() {
+        let content = "2026-10-20T25:00:01.123456+02:00 host CRON[1]: (root) CMD (x)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.events, vec![]);
+        assert_eq!(
+            result.warnings.len(),
+            1,
+            "malformed CRON timestamp was silent"
+        );
+        assert_eq!(result.warnings[0].line, 1);
+        assert!(result.warnings[0].message.contains("bad RFC3339 timestamp"));
+    }
+
+    #[test]
+    fn rsyslog_fileformat_without_a_fraction_is_a_cron_event() {
+        // Forwarded records often omit the sub-second part. The date is
+        // still one RFC3339 token.
+        let content = "2026-10-20T03:00:01+02:00 host CRON[1]: (root) CMD (x)\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(
+            result.events[0].timestamp.to_string(),
+            "2026-10-20T01:00:01Z"
+        );
+    }
+
+    #[test]
+    fn non_cron_rfc3339_lines_are_skipped_silently() {
+        let content = "\
+2026-10-20T03:00:01.123456+02:00 host sshd[1]: Accepted publickey for root
+2026-10-20T25:00:01Z host sshd[2]: Accepted publickey for root
+";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.events, vec![]);
+        assert_eq!(result.warnings, vec![]);
     }
 
     #[test]

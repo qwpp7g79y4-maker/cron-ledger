@@ -1,3 +1,3 @@
 {"__REALTIME_TIMESTAMP":"1792454401000000","SYSLOG_IDENTIFIER":"CROND","MESSAGE":"(root) CMD (/usr/local/bin/unrelated.sh)"}
-{"__REALTIME_TIMESTAMP":"1792483920000000","_BOOT_ID":"boot-a","SYSLOG_IDENTIFIER":"kernel","MESSAGE":"booting"}
+{"__REALTIME_TIMESTAMP":"1792483920000000","_BOOT_ID":"boot-a","SYSLOG_IDENTIFIER":"kernel","MESSAGE":"Linux version 6.1.0 (builder@host) (gcc) #1 SMP"}
 {"__REALTIME_TIMESTAMP":"1792483925000000","SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"backup.service","MESSAGE":"Started Nightly backup."}

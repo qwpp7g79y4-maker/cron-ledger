@@ -20,7 +20,9 @@ use jiff::Timestamp;
 
 use crate::cli::{Cli, InputPath};
 use crate::crontab::{self, describe_schedule, CronJob, ScheduleKind};
-use crate::ledger::{build_ledger, normalize_command, JobKey, JobSchedule, Ledger, ScheduledJob};
+use crate::ledger::{
+    build_ledger_with_coverage, normalize_command, JobKey, JobSchedule, Ledger, ScheduledJob,
+};
 use crate::log::{self, LogEvent};
 use crate::schedule::{self, default_timezone, resolve_timezone};
 use crate::systemd;
@@ -77,6 +79,10 @@ struct Collector {
     descriptions: HashMap<JobKey, String>,
     warnings: Vec<String>,
     events: Vec<LogEvent>,
+    /// Timestamps that bound log coverage. Syslog contributes its
+    /// recognised lines. The journal contributes every entry that had a
+    /// real timestamp, recognised or not.
+    span_timestamps: Vec<Timestamp>,
 }
 
 impl Collector {
@@ -231,6 +237,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         descriptions: HashMap::new(),
         warnings: Vec::new(),
         events: Vec::new(),
+        span_timestamps: Vec::new(),
     };
 
     for path in &cli.crontabs {
@@ -385,6 +392,8 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             c.warnings
                 .push(format!("{}:{}: {}", w.file, w.line, w.message));
         }
+        c.span_timestamps
+            .extend(parsed.events.iter().map(|e| e.timestamp));
         c.events.extend(parsed.events);
     }
 
@@ -396,10 +405,11 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             c.warnings
                 .push(format!("{}:{}: {}", w.file, w.line, w.message));
         }
+        c.span_timestamps.extend(parsed.coverage_timestamps);
         c.events.extend(parsed.events);
     }
 
-    let ledger = build_ledger(&c.jobs, &c.events);
+    let ledger = build_ledger_with_coverage(&c.jobs, &c.events, c.span_timestamps);
 
     Ok(Audit {
         ledger,
@@ -468,6 +478,49 @@ mod tests {
         };
         let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
         assert!(audit.ledger.entries.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn journal_entries_after_the_last_event_count_as_coverage() {
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-journal-span-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "0 6 * * * root /bin/job.sh\n").unwrap();
+        let journal_path = dir.join("journal.jsonl");
+        let us = |s: &str| -> i64 { ts(s).as_microsecond() };
+        std::fs::write(
+            &journal_path,
+            format!(
+                "{{\"__REALTIME_TIMESTAMP\":\"{}\",\"SYSLOG_IDENTIFIER\":\"CROND\",\"MESSAGE\":\"(root) CMD (other.sh)\"}}\n\
+                 {{\"__REALTIME_TIMESTAMP\":\"{}\",\"SYSLOG_IDENTIFIER\":\"sshd\",\"MESSAGE\":\"Disconnected\"}}\n",
+                us("2026-10-20T03:00:00Z"),
+                us("2026-10-20T09:00:00Z"),
+            ),
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            journal_json: vec![InputPath::File(journal_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Missed);
+        assert_eq!(
+            audit.ledger.log_coverage.last,
+            Some(ts("2026-10-20T09:00:00Z"))
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

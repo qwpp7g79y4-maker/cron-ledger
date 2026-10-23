@@ -1,0 +1,47 @@
+{
+  "events": [
+    {
+      "timestamp": "2026-10-20T01:00:01.123456Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 1234,
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "rsyslog-fileformat.log",
+      "line": 1
+    },
+    {
+      "timestamp": "2026-10-20T01:00:05.25Z",
+      "source": {
+        "CronCmdEnd": {
+          "user": "root",
+          "pid": 1234,
+          "command": "/usr/local/bin/backup.sh"
+        }
+      },
+      "file": "rsyslog-fileformat.log",
+      "line": 2
+    },
+    {
+      "timestamp": "2026-10-20T04:00:00Z",
+      "source": {
+        "CronCmd": {
+          "user": "root",
+          "pid": 8,
+          "command": "/usr/local/bin/ok.sh"
+        }
+      },
+      "file": "rsyslog-fileformat.log",
+      "line": 5
+    }
+  ],
+  "warnings": [
+    {
+      "file": "rsyslog-fileformat.log",
+      "line": 3,
+      "message": "bad RFC3339 timestamp: failed to parse hours in UTC numeric offset: failed to parse hours (requires a two digit integer): parameter 'time zone offset hours' is not in the required range of -25..=25"
+    }
+  ]
+}

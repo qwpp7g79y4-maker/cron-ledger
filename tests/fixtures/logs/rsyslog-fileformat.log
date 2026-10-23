@@ -1,0 +1,5 @@
+2026-10-20T03:00:01.123456+02:00 web1 CRON[1234]: (root) CMD (/usr/local/bin/backup.sh)
+2026-10-20T01:00:05.250000Z web1 CROND[1234]: (root) CMDEND (/usr/local/bin/backup.sh)
+2026-10-20T03:00:09.123456+99:00 web1 CRON[9]: (root) CMD (/usr/local/bin/backup.sh)
+2026-10-20T03:00:10.000000+02:00 web1 sshd[1]: Accepted publickey for root
+Oct 20 04:00:00 web1 CRON[8]: (root) CMD (/usr/local/bin/ok.sh)

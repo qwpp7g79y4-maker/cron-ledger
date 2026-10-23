@@ -6,7 +6,10 @@ mod job_key;
 mod matcher;
 mod status;
 
-pub use build::{build_ledger, JobLedgerEntry, JobOutcome, JobSchedule, Ledger, ScheduledJob};
+pub use build::{
+    build_ledger, build_ledger_with_coverage, JobLedgerEntry, JobOutcome, JobSchedule, Ledger,
+    ScheduledJob,
+};
 pub use job_key::{normalize_command, JobKey};
 pub use matcher::{match_runs, LogCoverage, RunOutcome};
 pub use status::Status;

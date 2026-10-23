@@ -34,8 +34,12 @@ pub enum EventSource {
     /// `Started ...` message (`SYSLOG_IDENTIFIER=systemd`). The subject
     /// unit is `UNIT` when present, otherwise `_SYSTEMD_UNIT`.
     SystemdUnitStart { unit: String },
-    /// A boot, inferred from a new `_BOOT_ID` appearing in the journal.
-    /// Used only for `@reboot` jobs' informational `REBOOT_ONLY` status.
+    /// A boot whose start the journal actually shows. `_BOOT_ID` only
+    /// names the boot. The timestamp is the entry that carries the
+    /// evidence: a kernel banner (`Linux version`, `Booting Linux`,
+    /// `Booting paravirtualized kernel`) or any entry journald received
+    /// within two minutes of `CLOCK_MONOTONIC` zero. Used for `@reboot`'s
+    /// informational `REBOOT_ONLY` list and for a `Persistent=` catch-up.
     Boot { boot_id: Option<String> },
 }
 
@@ -81,4 +85,11 @@ pub struct LogWarning {
 pub struct LogParseResult {
     pub events: Vec<LogEvent>,
     pub warnings: Vec<LogWarning>,
+    /// Timestamps of every journal entry that parsed as an object with a
+    /// usable `__REALTIME_TIMESTAMP`, whether or not it became an event.
+    /// Invalid JSON and entries with no usable timestamp are absent, so
+    /// they cannot widen [`crate::ledger::LogCoverage`]. Syslog leaves
+    /// this empty; its coverage is the recognised events.
+    #[serde(skip)]
+    pub coverage_timestamps: Vec<Timestamp>,
 }

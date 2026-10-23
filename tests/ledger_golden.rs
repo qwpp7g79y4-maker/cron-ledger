@@ -2,8 +2,10 @@
 //! crontab parsing and schedule expansion with parsed log events.
 
 use cron_ledger::crontab::{parse_user_crontab, ScheduleKind};
-use cron_ledger::ledger::{build_ledger, JobKey, JobOutcome, JobSchedule, ScheduledJob, Status};
-use cron_ledger::log::{parse_syslog_cron, EventSource, ExitStatus, LogEvent};
+use cron_ledger::ledger::{
+    build_ledger, build_ledger_with_coverage, JobKey, JobOutcome, JobSchedule, ScheduledJob, Status,
+};
+use cron_ledger::log::{parse_journal_json, parse_syslog_cron, EventSource, ExitStatus, LogEvent};
 use cron_ledger::schedule;
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
@@ -214,6 +216,190 @@ fn log_gap_missed_only_in_covered_days() {
             Status::Missed,  // day 26: inside coverage, never ran
         ]
     );
+}
+
+fn journal_line(ts_us: i64, extra: &str) -> String {
+    format!(r#"{{"__REALTIME_TIMESTAMP":"{ts_us}",{extra}}}"#)
+}
+
+#[test]
+fn journal_entry_after_the_last_event_keeps_a_later_run_missed() {
+    // Recognised CMD at 03:00, then a valid but unrecognised sshd line at
+    // 09:00. 06:00 sits inside that span and has no run of its own.
+    let t_cmd = ts("2026-10-20T03:00:00Z").as_microsecond();
+    let t_sshd = ts("2026-10-20T09:00:00Z").as_microsecond();
+    let t_bad_body = ts("2026-10-20T09:30:00Z").as_microsecond();
+    let content = format!(
+        "{}\n{}\nnot json at all\n{{\"SYSLOG_IDENTIFIER\":\"sshd\",\"MESSAGE\":\"no timestamp\"}}\n{}\n",
+        journal_line(
+            t_cmd,
+            r#""SYSLOG_IDENTIFIER":"CROND","MESSAGE":"(root) CMD (other.sh)""#
+        ),
+        journal_line(
+            t_sshd,
+            r#""SYSLOG_IDENTIFIER":"sshd","MESSAGE":"Disconnected from user""#
+        ),
+        journal_line(
+            t_bad_body,
+            r#""SYSLOG_IDENTIFIER":"CROND","MESSAGE":"not a cron body""#
+        ),
+    );
+    let parsed = parse_journal_json(&content, "journal.jsonl");
+    assert_eq!(parsed.events.len(), 1, "the sshd line is not a cron event");
+    assert_eq!(parsed.warnings.len(), 3, "invalid lines stay warnings");
+    // The bad cron body is a real entry and does extend the span. The
+    // invalid JSON line and the entry with no timestamp do not.
+    assert_eq!(
+        parsed.coverage_timestamps,
+        vec![
+            ts("2026-10-20T03:00:00Z"),
+            ts("2026-10-20T09:00:00Z"),
+            ts("2026-10-20T09:30:00Z"),
+        ]
+    );
+
+    let job = cron_job("root", "/bin/job.sh", vec![ts("2026-10-20T06:00:00Z")]);
+    let ledger = build_ledger_with_coverage(&[job], &parsed.events, parsed.coverage_timestamps);
+    let JobOutcome::Standard(outcomes) = &ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    assert_eq!(
+        outcomes[0].status,
+        Status::Missed,
+        "coverage stopped at the last recognised event ({:?})",
+        ledger.log_coverage
+    );
+}
+
+#[test]
+fn journal_excerpt_without_boot_evidence_does_not_catch_up_a_persistent_timer() {
+    // 00:00 is a real cron line (coverage start). 08:00 is the first line
+    // of this `_BOOT_ID` and is an ordinary sshd record eight hours after
+    // monotonic zero, not a boot. A persistent timer due at 03:00 with no
+    // `Started` line must not become LATE (caught up) at 08:00.
+    let t0 = ts("2026-10-20T00:00:00Z").as_microsecond();
+    let t8 = ts("2026-10-20T08:00:00Z").as_microsecond();
+    let content = format!(
+        "{}\n{}\n",
+        journal_line(
+            t0,
+            r#""SYSLOG_IDENTIFIER":"CROND","MESSAGE":"(root) CMD (other.sh)""#
+        ),
+        journal_line(
+            t8,
+            r#""_BOOT_ID":"abc","__MONOTONIC_TIMESTAMP":"28800000000","SYSLOG_IDENTIFIER":"sshd","MESSAGE":"Disconnected from user""#
+        ),
+    );
+    let parsed = parse_journal_json(&content, "journal.jsonl");
+    assert!(
+        parsed
+            .events
+            .iter()
+            .all(|e| !matches!(e.source, EventSource::Boot { .. })),
+        "excerpt invented a boot: {:?}",
+        parsed.events
+    );
+
+    let reboot = ScheduledJob {
+        key: JobKey::Cron {
+            user: "root".to_string(),
+            command: "echo reboot".to_string(),
+        },
+        file: "crontab".to_string(),
+        line: 1,
+        schedule: JobSchedule::Reboot,
+        tolerance: Duration::from_secs(300),
+        persistent: false,
+    };
+    let timer = ScheduledJob {
+        key: JobKey::Timer {
+            unit: "backup.service".to_string(),
+        },
+        file: "backup.timer".to_string(),
+        line: 1,
+        schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
+        tolerance: Duration::from_secs(300),
+        persistent: true,
+    };
+    let ledger =
+        build_ledger_with_coverage(&[reboot, timer], &parsed.events, parsed.coverage_timestamps);
+    assert_eq!(
+        ledger.entries[0].outcome,
+        JobOutcome::Reboot { boots: vec![] },
+        "@reboot listed an invented boot time"
+    );
+    let JobOutcome::Standard(outcomes) = &ledger.entries[1].outcome else {
+        panic!("expected a standard outcome");
+    };
+    // 03:00 is inside the journal span (00:00 through 08:00) and nothing
+    // started the unit. MISSED, not a catch-up at the sshd line.
+    assert_eq!(outcomes[0].status, Status::Missed);
+    assert_eq!(outcomes[0].actual, None);
+}
+
+#[test]
+fn kernel_banner_still_catches_up_a_persistent_timer() {
+    // An sshd line of this boot comes first and is not the boot. The
+    // kernel banner ten minutes later is. The timer's `Started` line
+    // just after that stays LATE (caught up), at the real start time.
+    let t0 = ts("2026-10-20T00:00:00Z").as_microsecond();
+    let t_sshd = ts("2026-10-20T08:00:00Z").as_microsecond();
+    let t_boot = ts("2026-10-20T08:10:00Z").as_microsecond();
+    let t_start = ts("2026-10-20T08:12:00Z").as_microsecond();
+    let content = format!(
+        "{}\n{}\n{}\n{}\n",
+        journal_line(
+            t0,
+            r#""SYSLOG_IDENTIFIER":"CROND","MESSAGE":"(root) CMD (other.sh)""#
+        ),
+        journal_line(
+            t_sshd,
+            r#""_BOOT_ID":"boot-a","__MONOTONIC_TIMESTAMP":"28800000000","SYSLOG_IDENTIFIER":"sshd","MESSAGE":"Disconnected from user""#
+        ),
+        journal_line(
+            t_boot,
+            r#""_BOOT_ID":"boot-a","__MONOTONIC_TIMESTAMP":"29400000000","SYSLOG_IDENTIFIER":"kernel","MESSAGE":"Linux version 6.1.0 (builder@host) (gcc) #1 SMP""#
+        ),
+        journal_line(
+            t_start,
+            r#""_BOOT_ID":"boot-a","SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"init.scope","UNIT":"backup.service","MESSAGE":"Started Nightly backup.""#
+        ),
+    );
+    let parsed = parse_journal_json(&content, "journal.jsonl");
+    let reboot = ScheduledJob {
+        key: JobKey::Cron {
+            user: "root".to_string(),
+            command: "echo reboot".to_string(),
+        },
+        file: "crontab".to_string(),
+        line: 1,
+        schedule: JobSchedule::Reboot,
+        tolerance: Duration::from_secs(300),
+        persistent: false,
+    };
+    let timer = ScheduledJob {
+        key: JobKey::Timer {
+            unit: "backup.service".to_string(),
+        },
+        file: "backup.timer".to_string(),
+        line: 1,
+        schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
+        tolerance: Duration::from_secs(300),
+        persistent: true,
+    };
+    let ledger =
+        build_ledger_with_coverage(&[reboot, timer], &parsed.events, parsed.coverage_timestamps);
+    assert_eq!(
+        ledger.entries[0].outcome,
+        JobOutcome::Reboot {
+            boots: vec![ts("2026-10-20T08:10:00Z")]
+        }
+    );
+    let JobOutcome::Standard(outcomes) = &ledger.entries[1].outcome else {
+        panic!("expected a standard outcome");
+    };
+    assert_eq!(outcomes[0].status, Status::LateCaughtUp);
+    assert_eq!(outcomes[0].actual, Some(ts("2026-10-20T08:12:00Z")));
 }
 
 #[test]

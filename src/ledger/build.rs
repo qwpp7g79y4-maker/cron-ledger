@@ -115,10 +115,22 @@ fn job_key_label(key: &JobKey) -> String {
     }
 }
 
+/// Build the ledger, taking the log span from `events` themselves.
+///
+/// That is the right span for syslog, where a line that is not a
+/// recognised cron record is skipped and has no timestamp of its own.
+/// Journal input has a wider span — every entry with a real timestamp,
+/// recognised or not — and should use [`build_ledger_with_coverage`].
+pub fn build_ledger(jobs: &[ScheduledJob], events: &[LogEvent]) -> Ledger {
+    build_ledger_with_coverage(jobs, events, events.iter().map(|e| e.timestamp))
+}
+
 /// Build the ledger: match every job's expected run times against the
-/// events that identify it, using the logs' overall coverage (earliest to
-/// latest log line, across every event regardless of which job it
-/// belongs to) to tell `MISSED` apart from `NO_TRACE`.
+/// events that identify it. `coverage_timestamps` is the span of the
+/// logs, earliest valid line to latest, and is what tells `MISSED` apart
+/// from `NO_TRACE`. For a journal this is every entry with a parseable
+/// `__REALTIME_TIMESTAMP`, including lines that are not a recognised
+/// event. Invalid lines are left out by the caller.
 ///
 /// Jobs that normalize to the same [`JobKey`] (the same cron command
 /// scheduled more than once, say from two files) are matched together
@@ -128,8 +140,12 @@ fn job_key_label(key: &JobKey) -> String {
 /// nearest-match heuristic as a single job's, not an optimal
 /// assignment, so which schedule line claims a given run among several
 /// sharing a key is approximate; a warning notes when this happens.
-pub fn build_ledger(jobs: &[ScheduledJob], events: &[LogEvent]) -> Ledger {
-    let log_coverage = LogCoverage::from_timestamps(events.iter().map(|e| e.timestamp));
+pub fn build_ledger_with_coverage(
+    jobs: &[ScheduledJob],
+    events: &[LogEvent],
+    coverage_timestamps: impl IntoIterator<Item = Timestamp>,
+) -> Ledger {
+    let log_coverage = LogCoverage::from_timestamps(coverage_timestamps);
 
     let mut cron_events: HashMap<JobKey, Vec<&LogEvent>> = HashMap::new();
     let mut timer_starts: HashMap<String, Vec<Timestamp>> = HashMap::new();

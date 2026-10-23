@@ -3,7 +3,9 @@
 //! `(user) CMD (cmd)` style `MESSAGE` cronie/vixie write to syslog,
 //! a manager `Started ...` message (`SYSLOG_IDENTIFIER=systemd`) for
 //! timer-activated services, preferring `UNIT` over `_SYSTEMD_UNIT`, and
-//! `_BOOT_ID` for `@reboot`'s informational boot list.
+//! `_BOOT_ID` names a boot for `@reboot`'s informational list. The boot's
+//! time comes only from an entry that shows it: a kernel banner, or any
+//! entry received within two minutes of `CLOCK_MONOTONIC` zero.
 //! `MESSAGE` may be a JSON string, or (for non-UTF-8 output) a JSON array
 //! of byte values.
 
@@ -32,13 +34,61 @@ fn extract_string(value: Option<&Value>) -> Option<String> {
     }
 }
 
+fn extract_i64(value: Option<&Value>) -> Option<i64> {
+    match value? {
+        Value::String(s) => s.parse().ok(),
+        Value::Number(n) => n.as_i64(),
+        _ => None,
+    }
+}
+
 fn extract_realtime_timestamp(value: Option<&Value>) -> Option<Timestamp> {
-    let micros = match value? {
-        Value::String(s) => s.parse::<i64>().ok()?,
-        Value::Number(n) => n.as_i64()?,
-        _ => return None,
+    Timestamp::from_microsecond(extract_i64(value)?).ok()
+}
+
+/// `__MONOTONIC_TIMESTAMP` is `CLOCK_MONOTONIC` at the moment journald
+/// received the entry (`systemd.journal-fields(7)`), in microseconds.
+/// That clock starts at kernel boot and does not count time spent
+/// suspended. An entry received within this long of zero was logged at
+/// the start of the boot; a later entry was not.
+///
+/// The entry's own `__REALTIME_TIMESTAMP` is the boot observation.
+/// Subtracting the two fields is not: for kernel messages the realtime
+/// field is reception time, and `_SOURCE_MONOTONIC_TIMESTAMP` is
+/// `CLOCK_BOOTTIME`, which is not interchangeable with it across suspend.
+const BOOT_START_MAX_MONOTONIC_US: i64 = 120_000_000;
+
+fn is_kernel_record(obj: &serde_json::Map<String, Value>) -> bool {
+    let identifier = obj
+        .get("SYSLOG_IDENTIFIER")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let transport = obj.get("_TRANSPORT").and_then(|v| v.as_str()).unwrap_or("");
+    identifier.eq_ignore_ascii_case("kernel") || transport == "kernel"
+}
+
+/// The first lines a kernel prints, imported by journald from `/dev/kmsg`.
+/// `dmesg` shows them at monotonic 0 (`Linux version ...`, and on some
+/// machines `Booting Linux on physical CPU ...` or
+/// `Booting paravirtualized kernel on bare hardware`). Journald may
+/// receive them only once it is running, so the reception monotonic
+/// timestamp can already be minutes later; the text is still the boot.
+fn is_kernel_boot_banner(obj: &serde_json::Map<String, Value>) -> bool {
+    if !is_kernel_record(obj) {
+        return false;
+    }
+    let Some(message) = extract_string(obj.get("MESSAGE")) else {
+        return false;
     };
-    Timestamp::from_microsecond(micros).ok()
+    let message = message.trim();
+    message.starts_with("Linux version ")
+        || message.starts_with("Booting Linux")
+        || message.starts_with("Booting paravirtualized kernel")
+}
+
+fn received_at_boot_start(obj: &serde_json::Map<String, Value>) -> bool {
+    extract_i64(obj.get("__MONOTONIC_TIMESTAMP"))
+        .is_some_and(|us| (0..BOOT_START_MAX_MONOTONIC_US).contains(&us))
 }
 
 fn extract_pid(obj: &serde_json::Map<String, Value>) -> Option<u32> {
@@ -78,6 +128,7 @@ fn is_pam_session_message(message: &str) -> bool {
 pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
     let mut events = Vec::new();
     let mut warnings = Vec::new();
+    let mut coverage_timestamps = Vec::new();
     let mut seen_boots: HashSet<String> = HashSet::new();
 
     for (idx, raw_line) in content.lines().enumerate() {
@@ -114,8 +165,20 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
             continue;
         };
 
+        // A parsed object with a real timestamp is part of the log span
+        // even when it is not a cron, timer, or boot event. Lines that
+        // failed before this point (invalid JSON, not an object, no
+        // usable timestamp) are not.
+        coverage_timestamps.push(timestamp);
+
         if let Some(boot_id) = obj.get("_BOOT_ID").and_then(|v| v.as_str()) {
-            if seen_boots.insert(boot_id.to_string()) {
+            // Do not mark the id seen until this entry actually shows
+            // the boot time. A later line of the same boot may be the
+            // one that does.
+            if !seen_boots.contains(boot_id)
+                && (is_kernel_boot_banner(obj) || received_at_boot_start(obj))
+            {
+                seen_boots.insert(boot_id.to_string());
                 events.push(LogEvent {
                     timestamp,
                     source: EventSource::Boot {
@@ -198,7 +261,11 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
         }
     }
 
-    LogParseResult { events, warnings }
+    LogParseResult {
+        events,
+        warnings,
+        coverage_timestamps,
+    }
 }
 
 #[cfg(test)]
@@ -305,8 +372,8 @@ mod tests {
     #[test]
     fn new_boot_id_emits_one_boot_event_only_once() {
         let content = "\
-{\"__REALTIME_TIMESTAMP\":\"1792897201000000\",\"_BOOT_ID\":\"abc\",\"SYSLOG_IDENTIFIER\":\"kernel\",\"MESSAGE\":\"booting\"}
-{\"__REALTIME_TIMESTAMP\":\"1792897202000000\",\"_BOOT_ID\":\"abc\",\"SYSLOG_IDENTIFIER\":\"kernel\",\"MESSAGE\":\"booted\"}
+{\"__REALTIME_TIMESTAMP\":\"1792897201000000\",\"_BOOT_ID\":\"abc\",\"SYSLOG_IDENTIFIER\":\"kernel\",\"MESSAGE\":\"Linux version 6.1.0 (builder@host) (gcc) #1 SMP\"}
+{\"__REALTIME_TIMESTAMP\":\"1792897202000000\",\"_BOOT_ID\":\"abc\",\"SYSLOG_IDENTIFIER\":\"kernel\",\"MESSAGE\":\"Linux version 6.1.0 (builder@host) (gcc) #1 SMP\"}
 ";
         let result = parse_journal_json(content, "journal.json");
         let boots: Vec<_> = result
@@ -315,6 +382,110 @@ mod tests {
             .filter(|e| matches!(e.source, EventSource::Boot { .. }))
             .collect();
         assert_eq!(boots.len(), 1);
+        assert_eq!(
+            boots[0].timestamp,
+            Timestamp::from_microsecond(1_792_897_201_000_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn kernel_boot_banners_record_the_entry_even_when_reception_is_later() {
+        // journald imports `/dev/kmsg` when it starts. Reception can be
+        // minutes after monotonic zero (the 10-minute value below) while
+        // the banner text is still the boot.
+        for message in [
+            "Linux version 6.1.0 (builder@host) (gcc) #1 SMP",
+            "Booting Linux on physical CPU 0x0",
+            "Booting paravirtualized kernel on bare hardware",
+        ] {
+            let content = format!(
+                r#"{{"__REALTIME_TIMESTAMP":"1792483800000000","__MONOTONIC_TIMESTAMP":"600000000","_BOOT_ID":"abc","SYSLOG_IDENTIFIER":"kernel","MESSAGE":"{message}"}}"#
+            );
+            let boots = boot_events(&content);
+            assert_eq!(boots.len(), 1, "{message}");
+            assert_eq!(
+                boots[0].timestamp,
+                Timestamp::from_microsecond(1_792_483_800_000_000).unwrap(),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn kernel_banner_without_syslog_identifier_still_counts_via_transport() {
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792483800000000","__MONOTONIC_TIMESTAMP":"600000000","_BOOT_ID":"abc","_TRANSPORT":"kernel","MESSAGE":"Linux version 6.1.0 (builder@host) (gcc) #1 SMP"}"#;
+        let boots = boot_events(content);
+        assert_eq!(boots.len(), 1);
+    }
+
+    #[test]
+    fn userspace_line_quoting_linux_version_is_not_a_boot() {
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792483800000000","__MONOTONIC_TIMESTAMP":"28800000000","_BOOT_ID":"abc","SYSLOG_IDENTIFIER":"backup-tool","MESSAGE":"Linux version 1.0 started"}"#;
+        assert!(boot_events(content).is_empty());
+    }
+
+    #[test]
+    fn entry_received_within_two_minutes_of_monotonic_zero_is_a_boot() {
+        // 5s, and one microsecond short of two minutes. The boot time is
+        // this entry's realtime, not realtime minus monotonic.
+        for monotonic in ["5000000", "119999999"] {
+            let content = format!(
+                r#"{{"__REALTIME_TIMESTAMP":"1792483805000000","__MONOTONIC_TIMESTAMP":"{monotonic}","_BOOT_ID":"abc","SYSLOG_IDENTIFIER":"systemd","MESSAGE":"Started Journal Service."}}"#
+            );
+            let boots = boot_events(&content);
+            assert_eq!(boots.len(), 1, "monotonic {monotonic}");
+            assert_eq!(
+                boots[0].timestamp,
+                Timestamp::from_microsecond(1_792_483_805_000_000).unwrap(),
+                "monotonic {monotonic}"
+            );
+        }
+    }
+
+    #[test]
+    fn entry_received_at_two_minutes_is_not_the_start_of_the_boot() {
+        let content = r#"{"__REALTIME_TIMESTAMP":"1792483800000000","__MONOTONIC_TIMESTAMP":"120000000","_BOOT_ID":"abc","SYSLOG_IDENTIFIER":"systemd","MESSAGE":"Started Journal Service."}"#;
+        assert!(boot_events(content).is_empty());
+    }
+
+    fn boot_events(content: &str) -> Vec<LogEvent> {
+        parse_journal_json(content, "journal.json")
+            .events
+            .into_iter()
+            .filter(|e| matches!(e.source, EventSource::Boot { .. }))
+            .collect()
+    }
+
+    #[test]
+    fn boot_id_on_a_later_line_is_not_a_boot_time() {
+        // Eight hours after CLOCK_MONOTONIC zero. `_BOOT_ID` only names
+        // the boot; this line's own timestamp is not when the boot happened.
+        let content = "\
+{\"__REALTIME_TIMESTAMP\":\"1792491120000000\",\"_BOOT_ID\":\"abc\",\"__MONOTONIC_TIMESTAMP\":\"28800000000\",\"SYSLOG_IDENTIFIER\":\"sshd\",\"MESSAGE\":\"Disconnected from user\"}
+{\"__REALTIME_TIMESTAMP\":\"1792494720000000\",\"_BOOT_ID\":\"abc\",\"__MONOTONIC_TIMESTAMP\":\"32400000000\",\"SYSLOG_IDENTIFIER\":\"CROND\",\"MESSAGE\":\"(root) CMD (backup.sh)\"}
+";
+        let result = parse_journal_json(content, "journal.json");
+        assert!(
+            boot_events(content).is_empty(),
+            "recorded a boot without boot-time evidence"
+        );
+        assert_eq!(result.events.len(), 1);
+    }
+
+    #[test]
+    fn boot_time_is_the_banner_line_not_an_earlier_entry_of_the_same_boot() {
+        let content = "\
+{\"__REALTIME_TIMESTAMP\":\"1792483200000000\",\"_BOOT_ID\":\"abc\",\"__MONOTONIC_TIMESTAMP\":\"28800000000\",\"SYSLOG_IDENTIFIER\":\"sshd\",\"MESSAGE\":\"Disconnected from user\"}
+{\"__REALTIME_TIMESTAMP\":\"1792483800000000\",\"_BOOT_ID\":\"abc\",\"__MONOTONIC_TIMESTAMP\":\"29400000000\",\"SYSLOG_IDENTIFIER\":\"kernel\",\"_TRANSPORT\":\"kernel\",\"MESSAGE\":\"Linux version 6.1.0 (builder@host) (gcc) #1 SMP\"}
+";
+        let boots = boot_events(content);
+        assert_eq!(boots.len(), 1);
+        assert_eq!(
+            boots[0].timestamp,
+            Timestamp::from_microsecond(1_792_483_800_000_000).unwrap(),
+            "boot timestamp followed the earlier line instead of the kernel banner"
+        );
+        assert_eq!(boots[0].line, 2);
     }
 
     #[test]
