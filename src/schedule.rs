@@ -42,6 +42,23 @@ pub fn expand(
     since: Timestamp,
     until: Timestamp,
 ) -> Vec<Timestamp> {
+    expand_bounded(schedule, tz, since, until, usize::MAX)
+}
+
+/// Like [`expand`], but stop the day-walk once the raw candidate count
+/// is already past `budget` by more than two days of this schedule.
+/// Only the first and last processed day can lose entries to the final
+/// window filter, each by at most one day's worth, so a result longer
+/// than `budget` is still longer than `budget` after that filter.
+/// The returned instants are sorted, deduplicated, and inside
+/// `[since, until)`.
+pub fn expand_bounded(
+    schedule: &Schedule,
+    tz: &TimeZone,
+    since: Timestamp,
+    until: Timestamp,
+    budget: usize,
+) -> Vec<Timestamp> {
     if since >= until {
         return Vec::new();
     }
@@ -50,13 +67,15 @@ pub fn expand(
     let hours = field_values(&schedule.hour, 0, 23);
     let minutes = field_values(&schedule.minute, 0, 59);
     let hour_is_wildcard = schedule.hour == Field::Star;
+    let per_day_max = hours.len().saturating_mul(minutes.len());
+    let stop_at = budget.saturating_add(per_day_max.saturating_mul(2));
 
     let mut date = since.to_zoned(tz.clone()).date();
     let until_date = until.to_zoned(tz.clone()).date();
     let mut candidates: Vec<Timestamp> = Vec::new();
 
     loop {
-        if date > until_date {
+        if date > until_date || candidates.len() > stop_at {
             break;
         }
         if months.contains(&u32::from(date.month() as u8)) {
@@ -393,6 +412,29 @@ mod tests {
         for pair in got.windows(2) {
             assert!(pair[0] < pair[1], "not strictly increasing: {pair:?}");
         }
+    }
+
+    #[test]
+    fn expand_bounded_stops_materialising_once_over_budget() {
+        let tz = TimeZone::UTC;
+        let schedule = schedule_of("* * * * * echo hi\n");
+        let since = date(2000, 1, 1)
+            .at(0, 0, 0, 0)
+            .to_zoned(tz.clone())
+            .unwrap()
+            .timestamp();
+        let until = date(2050, 1, 1)
+            .at(0, 0, 0, 0)
+            .to_zoned(tz.clone())
+            .unwrap()
+            .timestamp();
+        let budget = 10;
+        let got = expand_bounded(&schedule, &tz, since, until, budget);
+        assert!(
+            budget < got.len() && got.len() < 100_000,
+            "len={}",
+            got.len()
+        );
     }
 
     fn arb_field(min: u8, max: u8) -> impl proptest::strategy::Strategy<Value = Field> {

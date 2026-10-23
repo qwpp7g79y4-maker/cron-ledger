@@ -118,6 +118,11 @@ impl Collector {
         Ok(())
     }
 
+    /// How many more expected runs this audit can still accept.
+    fn remaining_budget(&self) -> usize {
+        MAX_EXPECTED_RUNS.saturating_sub(self.expected_runs)
+    }
+
     fn add_cron_job(
         &mut self,
         job: &CronJob,
@@ -145,7 +150,8 @@ impl Collector {
                     },
                     None => default_tz.clone(),
                 };
-                let expected = schedule::expand(s, &tz, since, until);
+                let expected =
+                    schedule::expand_bounded(s, &tz, since, until, self.remaining_budget());
                 self.account_expected_runs(&format!("{}:{}", job.file, job.line), expected.len())?;
                 // The first firing at or after `until` is outside this
                 // window. The late search stops there, so that later
@@ -465,7 +471,13 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             };
             for cal_str in &timer.on_calendar {
                 match systemd::parse_calendar(cal_str) {
-                    Ok(cal) => match systemd::expand_calendar(&cal, &tz, since, until) {
+                    Ok(cal) => match systemd::expand_calendar_bounded(
+                        &cal,
+                        &tz,
+                        since,
+                        until,
+                        c.remaining_budget(),
+                    ) {
                         Ok(times) => {
                             c.account_expected_runs(&label, times.len())?;
                             all_times.extend(times);

@@ -400,6 +400,21 @@ pub fn expand(
     since: jiff::Timestamp,
     until: jiff::Timestamp,
 ) -> Result<Vec<jiff::Timestamp>, String> {
+    expand_bounded(cal, default_tz, since, until, usize::MAX)
+}
+
+/// Like [`expand`], but stop the day-walk once the raw candidate count
+/// is already past `budget` by more than two days of this calendar.
+/// Only the first and last processed day can lose entries to the final
+/// window filter, each by at most one day's worth, so a result longer
+/// than `budget` is still longer than `budget` after that filter.
+pub fn expand_bounded(
+    cal: &SystemdCalendar,
+    default_tz: &jiff::tz::TimeZone,
+    since: jiff::Timestamp,
+    until: jiff::Timestamp,
+    budget: usize,
+) -> Result<Vec<jiff::Timestamp>, String> {
     use jiff::tz::{Disambiguation, TimeZone};
 
     if since >= until {
@@ -414,13 +429,18 @@ pub fn expand(
     let hours = cal.hour.bounded_values(0, 23);
     let minutes = cal.minute.bounded_values(0, 59);
     let seconds = cal.second.bounded_values(0, 59);
+    let per_day_max = hours
+        .len()
+        .saturating_mul(minutes.len())
+        .saturating_mul(seconds.len());
+    let stop_at = budget.saturating_add(per_day_max.saturating_mul(2));
 
     let mut date = since.to_zoned(tz.clone()).date();
     let until_date = until.to_zoned(tz.clone()).date();
     let mut out = Vec::new();
 
     loop {
-        if date > until_date {
+        if date > until_date || out.len() > stop_at {
             break;
         }
         if cal.year.contains(date.year().max(0) as u32)
@@ -507,6 +527,21 @@ mod tests {
                     .to_string()
             })
             .collect()
+    }
+
+    #[test]
+    fn expand_bounded_stops_materialising_once_over_budget() {
+        let cal = parse("*-*-* *:*:*").unwrap();
+        let tz = TimeZone::UTC;
+        let since: Timestamp = "2020-01-01T00:00:00Z".parse().unwrap();
+        let until: Timestamp = "2030-01-01T00:00:00Z".parse().unwrap();
+        let budget = 10;
+        let got = expand_bounded(&cal, &tz, since, until, budget).unwrap();
+        assert!(
+            budget < got.len() && got.len() < 1_000_000,
+            "len={}",
+            got.len()
+        );
     }
 
     #[test]
