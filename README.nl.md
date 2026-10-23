@@ -148,6 +148,7 @@ Elke claim in deze README wordt gedekt door een bestaande test of fixture in dez
 | Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` is de volledige verzameling jobs. De scan van `--system-root` draait dan niet óók, zodat een bestand onder die root niet een tweede keer wordt ingepland. `--system-root` zonder die vlaggen scant die map nog steeds | `src/app.rs::explicit_crontab_is_not_counted_again_by_the_system_root_scan`, `src/app.rs::system_root_default_scan_reads_etc_crontab_cron_d_and_spool` |
 | Een `journalctl -o json`-regel die een sleutel herhaalt wordt overgeslagen met een waarschuwing en is geen bewijs: er wordt geen run vastgelegd en de regel verlengt de logdekking niet | `src/log/journal.rs` (`duplicate_message_key_is_not_evidence`, `repeated_key_in_a_journal_object_is_not_evidence`) |
 | Een `--since`/`--until`-venster is begrensd op 5.000.000 verwachte runs over de hele audit; daarboven een duidelijke exitcode 2 in plaats van onbegrensde geheugengroei | `src/app.rs::window_over_the_expected_run_cap_is_a_usage_error_exit_two`, `src/app.rs::window_at_the_expected_run_cap_still_audits` |
+| Het tekstrapport toont hoogstens 50 waarschuwingen, met een regel `… en N meer`; de `warnings`-array van `--json` heeft altijd de volledige lijst en het aantal | `src/report/text.rs::many_warnings_are_truncated_in_text_but_full_in_json`, `exactly_the_warning_cap_is_not_truncated` |
 
 ## Ontwikkeling
 

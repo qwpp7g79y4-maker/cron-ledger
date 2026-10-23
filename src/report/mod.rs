@@ -76,6 +76,10 @@ pub fn use_color(no_color_set: bool, is_tty: bool) -> bool {
 /// (the first 5 missed times).
 const MAX_MISSED_SHOWN: usize = 5;
 
+/// How many warning lines the text report prints before one summary
+/// line for the rest (the first 50 warnings). `--json` keeps every warning.
+const MAX_WARNINGS_SHOWN: usize = 50;
+
 /// A job's outcome, reduced to the fields every renderer needs: counts,
 /// the most recent observed run, and the earliest `MISSED` times.
 pub(super) struct JobView<'a> {

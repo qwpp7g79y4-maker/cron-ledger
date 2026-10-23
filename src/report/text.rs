@@ -8,7 +8,7 @@ use jiff::Timestamp;
 
 use crate::ledger::{JobKey, JobOutcome, Ledger, Status};
 
-use super::{job_views, JobView, ReportContext};
+use super::{job_views, JobView, ReportContext, MAX_WARNINGS_SHOWN};
 
 /// Make crontab text, paths, and log excerpts safe to print on a
 /// terminal. Control characters (including ESC) become a visible
@@ -212,8 +212,13 @@ pub fn render_text(ledger: &Ledger, ctx: &ReportContext, color: bool) -> String 
     all_warnings.extend(ctx.extra_warnings.iter().map(|w| w.as_str()));
     if !all_warnings.is_empty() {
         out.push_str("Waarschuwingen:\n");
-        for w in all_warnings {
+        let shown = all_warnings.len().min(MAX_WARNINGS_SHOWN);
+        for w in &all_warnings[..shown] {
             let _ = writeln!(out, "  - {}", neutralize_controls(w));
+        }
+        let hidden = all_warnings.len() - shown;
+        if hidden > 0 {
+            let _ = writeln!(out, "  … en {hidden} meer");
         }
     }
 
@@ -274,5 +279,59 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["jobs"][0]["key"]["Cron"]["command"], command);
         assert_eq!(parsed["jobs"][0]["schedule"], "0 \u{1b}[0m * * * *");
+    }
+
+    fn ledger_with_warnings(warnings: Vec<String>) -> Ledger {
+        Ledger {
+            entries: vec![],
+            log_coverage: LogCoverage::default(),
+            warnings,
+        }
+    }
+
+    fn report_ctx<'a>(
+        tz: &'a TimeZone,
+        descriptions: &'a HashMap<JobKey, String>,
+    ) -> ReportContext<'a> {
+        ReportContext {
+            since: "2026-10-20T00:00:00Z".parse().unwrap(),
+            until: "2026-10-21T00:00:00Z".parse().unwrap(),
+            tz,
+            tolerance: Duration::from_secs(300),
+            descriptions,
+            extra_warnings: &[],
+        }
+    }
+
+    #[test]
+    fn many_warnings_are_truncated_in_text_but_full_in_json() {
+        let warnings: Vec<String> = (0..1000).map(|i| format!("warn {i}")).collect();
+        let ledger = ledger_with_warnings(warnings);
+        let tz = TimeZone::UTC;
+        let descriptions = HashMap::new();
+        let ctx = report_ctx(&tz, &descriptions);
+
+        let text = render_text(&ledger, &ctx, false);
+        assert_eq!(text.matches("\n  - warn ").count(), MAX_WARNINGS_SHOWN);
+        assert!(text.contains(&format!("en {} meer", 1000 - MAX_WARNINGS_SHOWN)));
+
+        let json = render_json(&ledger, &ctx);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["warnings"].as_array().unwrap().len(), 1000);
+    }
+
+    #[test]
+    fn exactly_the_warning_cap_is_not_truncated() {
+        let warnings: Vec<String> = (0..MAX_WARNINGS_SHOWN)
+            .map(|i| format!("warn {i}"))
+            .collect();
+        let ledger = ledger_with_warnings(warnings);
+        let tz = TimeZone::UTC;
+        let descriptions = HashMap::new();
+        let ctx = report_ctx(&tz, &descriptions);
+
+        let text = render_text(&ledger, &ctx, false);
+        assert_eq!(text.matches("\n  - warn ").count(), MAX_WARNINGS_SHOWN);
+        assert!(!text.contains("meer"));
     }
 }
