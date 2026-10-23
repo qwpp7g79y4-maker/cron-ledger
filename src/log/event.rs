@@ -30,9 +30,11 @@ pub enum EventSource {
         pid: Option<u32>,
         command: String,
     },
-    /// A systemd timer-activated service starting, from the manager's own
-    /// `Started ...` message (`SYSLOG_IDENTIFIER=systemd`). The subject
-    /// unit is `UNIT` when present, otherwise `_SYSTEMD_UNIT`.
+    /// A systemd timer-activated service run, from the manager's own
+    /// `Started ...` or `Finished ...` message (`SYSLOG_IDENTIFIER=systemd`).
+    /// `Finished ...` is a separate run only when this activation did not
+    /// already log `Started ...`. The subject unit is `UNIT` when present,
+    /// otherwise `_SYSTEMD_UNIT`.
     SystemdUnitStart { unit: String },
     /// A boot whose start the journal actually shows. `_BOOT_ID` only
     /// names the boot. The timestamp is the entry that carries the

@@ -1,11 +1,14 @@
 //! Parsing of `journalctl -o json` output (newline-delimited JSON, one
 //! object per entry): `SYSLOG_IDENTIFIER` cron/CRON/crond with the same
 //! `(user) CMD (cmd)` style `MESSAGE` cronie/vixie write to syslog,
-//! a manager `Started ...` message (`SYSLOG_IDENTIFIER=systemd`) for
-//! timer-activated services, preferring `UNIT` over `_SYSTEMD_UNIT`, and
-//! `_BOOT_ID` names a boot for `@reboot`'s informational list. The boot's
-//! time comes only from an entry that shows it: a kernel banner, or any
-//! entry received within two minutes of `CLOCK_MONOTONIC` zero.
+//! a manager `Started ...` or `Finished ...` message
+//! (`SYSLOG_IDENTIFIER=systemd`) for timer-activated services, preferring
+//! `UNIT` over `_SYSTEMD_UNIT`, and `_BOOT_ID` names a boot for
+//! `@reboot`'s informational list. `Starting ...` is not a run.
+//! `Finished ...` after `Started ...` for the same unit is the same run,
+//! not a second one. The boot's time comes only from an entry that shows
+//! it: a kernel banner, or any entry received within two minutes of
+//! `CLOCK_MONOTONIC` zero.
 //! `MESSAGE` may be a JSON string, or (for non-UTF-8 output) a JSON array
 //! of byte values. A repeated key in one object is ambiguous, so that
 //! line is skipped with a warning and is not evidence: it is not a run
@@ -256,6 +259,10 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
     let mut warnings = Vec::new();
     let mut coverage_timestamps = Vec::new();
     let mut seen_boots: HashSet<String> = HashSet::new();
+    // Units whose current activation already logged "Started ". A later
+    // "Finished " for that unit closes it and is not a second run.
+    // Type=oneshot never logs "Started ", so its "Finished " still counts.
+    let mut open_started: HashSet<String> = HashSet::new();
 
     for (idx, raw_line) in content.lines().enumerate() {
         let line_no = idx + 1;
@@ -388,8 +395,20 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
             // Only the manager itself (not a service logging its own
             // "Started ..." line, under its own unit, with its own
             // identifier) gets to report that *it* started a unit.
+            // Type=simple and Type=forking log "Started ". Type=oneshot
+            // logs "Finished " and not "Started ". "Starting " is the
+            // announcement, not a run. Both lines for one activation
+            // are one run.
             if let (Some(unit), Some(message)) = (unit, extract_string(obj.get("MESSAGE"))) {
-                if message.starts_with("Started ") {
+                let counts_as_run = if message.starts_with("Started ") {
+                    let _ = open_started.insert(unit.to_string());
+                    true
+                } else if message.starts_with("Finished ") {
+                    !open_started.remove(unit)
+                } else {
+                    false
+                };
+                if counts_as_run {
                     events.push(LogEvent {
                         timestamp,
                         source: EventSource::SystemdUnitStart {

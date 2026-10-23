@@ -91,6 +91,8 @@ cron-ledger --system-root /nonexistent \
 
 Elke regel is één JSON-object. Een regel die een sleutel herhaalt is geen bewijs: de regel wordt overgeslagen en als waarschuwing gemeld, op dezelfde manier als een regel die niet gelezen kan worden. Een herhaalde `MESSAGE`, `SYSLOG_IDENTIFIER`, `__REALTIME_TIMESTAMP`, `_TRANSPORT` of welke andere sleutel ook is genoeg. De regel telt niet als een run en verlengt de logdekking niet.
 
+Een timer-run is een manager-regel (`SYSLOG_IDENTIFIER=systemd`) waarvan `MESSAGE` begint met `Started `, of met `Finished ` wanneer die activatie nog geen `Started ` logde. `Starting ` is geen run. `UNIT` noemt de unit, of `_SYSTEMD_UNIT` als `UNIT` ontbreekt.
+
 ### `--json` voor scripts en CI
 
 ```sh

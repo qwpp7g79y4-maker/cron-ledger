@@ -633,6 +633,148 @@ fn timer_matches_via_systemd_unit_start_events() {
 }
 
 #[test]
+fn oneshot_finished_line_is_a_run_not_missed() {
+    // A Type=oneshot timer service logs "Starting …" and "Finished …"
+    // and never "Started …". The finish line is the run. The start
+    // announcement is not.
+    let t_cover = ts("2026-10-20T02:00:00Z").as_microsecond();
+    let t_starting = ts("2026-10-20T03:00:01Z").as_microsecond();
+    let t_finished = ts("2026-10-20T03:00:05Z").as_microsecond();
+    let content = format!(
+        "{}\n{}\n{}\n",
+        journal_line(
+            t_cover,
+            r#""SYSLOG_IDENTIFIER":"sshd","MESSAGE":"Disconnected from user""#
+        ),
+        journal_line(
+            t_starting,
+            r#""SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"init.scope","UNIT":"backup.service","MESSAGE":"Starting Nightly backup...""#
+        ),
+        journal_line(
+            t_finished,
+            r#""SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"init.scope","UNIT":"backup.service","MESSAGE":"Finished Nightly backup.""#
+        ),
+    );
+    let parsed = parse_journal_json(&content, "journal.jsonl");
+    let starts: Vec<_> = parsed
+        .events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.source,
+                EventSource::SystemdUnitStart { unit } if unit == "backup.service"
+            )
+        })
+        .collect();
+    assert_eq!(
+        starts.len(),
+        1,
+        "Starting is not a second run: {:?}",
+        parsed.events
+    );
+    assert_eq!(starts[0].timestamp, ts("2026-10-20T03:00:05Z"));
+
+    let job = ScheduledJob {
+        key: JobKey::Timer {
+            unit: "backup.service".to_string(),
+        },
+        file: "backup.timer".to_string(),
+        line: 1,
+        schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
+        tolerance: Duration::from_secs(300),
+        persistent: false,
+        next_after_window: None,
+    };
+    let ledger = build_ledger_with_coverage(&[job], &parsed.events, parsed.coverage_timestamps);
+    let JobOutcome::Standard(outcomes) = &ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    assert_eq!(
+        outcomes[0].status,
+        Status::Ok,
+        "oneshot Finished line was {:?}, not a run",
+        outcomes[0].status
+    );
+    assert_eq!(outcomes[0].actual, Some(ts("2026-10-20T03:00:05Z")));
+}
+
+#[test]
+fn started_and_finished_for_one_run_is_not_counted_twice() {
+    // Type=simple and Type=forking can log "Started " and, when the
+    // process exits, "Finished " for the same activation. The next
+    // expected time must stay MISSED: the finish line is not a second run.
+    let t_cover = ts("2026-10-20T02:00:00Z").as_microsecond();
+    let t_starting = ts("2026-10-20T03:00:01Z").as_microsecond();
+    let t_started = ts("2026-10-20T03:00:02Z").as_microsecond();
+    let t_finished = ts("2026-10-20T03:00:40Z").as_microsecond();
+    let t_tail = ts("2026-10-20T03:02:00Z").as_microsecond();
+    let content = format!(
+        "{}\n{}\n{}\n{}\n{}\n",
+        journal_line(
+            t_cover,
+            r#""SYSLOG_IDENTIFIER":"sshd","MESSAGE":"Disconnected from user""#
+        ),
+        journal_line(
+            t_starting,
+            r#""SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"init.scope","UNIT":"backup.service","MESSAGE":"Starting Nightly backup...""#
+        ),
+        journal_line(
+            t_started,
+            r#""SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"init.scope","UNIT":"backup.service","MESSAGE":"Started Nightly backup.""#
+        ),
+        journal_line(
+            t_finished,
+            r#""SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"init.scope","UNIT":"backup.service","MESSAGE":"Finished Nightly backup.""#
+        ),
+        journal_line(
+            t_tail,
+            r#""SYSLOG_IDENTIFIER":"sshd","MESSAGE":"Disconnected from user""#
+        ),
+    );
+    let parsed = parse_journal_json(&content, "journal.jsonl");
+    let starts: Vec<_> = parsed
+        .events
+        .iter()
+        .filter(|e| {
+            matches!(
+                &e.source,
+                EventSource::SystemdUnitStart { unit } if unit == "backup.service"
+            )
+        })
+        .collect();
+    assert_eq!(
+        starts.len(),
+        1,
+        "Started and Finished counted separately: {:?}",
+        starts
+    );
+    assert_eq!(starts[0].timestamp, ts("2026-10-20T03:00:02Z"));
+
+    let job = ScheduledJob {
+        key: JobKey::Timer {
+            unit: "backup.service".to_string(),
+        },
+        file: "backup.timer".to_string(),
+        line: 1,
+        schedule: JobSchedule::Standard(vec![
+            ts("2026-10-20T03:00:00Z"),
+            ts("2026-10-20T03:01:00Z"),
+        ]),
+        tolerance: Duration::from_secs(300),
+        persistent: false,
+        next_after_window: None,
+    };
+    let ledger = build_ledger_with_coverage(&[job], &parsed.events, parsed.coverage_timestamps);
+    let JobOutcome::Standard(outcomes) = &ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    assert_eq!(outcomes[0].status, Status::Ok);
+    assert_eq!(outcomes[0].actual, Some(ts("2026-10-20T03:00:02Z")));
+    assert_eq!(outcomes[1].status, Status::Missed);
+    assert!(outcomes[1].actual.is_none());
+}
+
+#[test]
 fn persistent_timer_missed_run_is_caught_up_late_via_boot_event() {
     // Machine off at 03:00, a `Persistent=true` timer's
     // boot catch-up run is observed in the journal at 08:12, after a
