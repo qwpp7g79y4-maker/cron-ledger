@@ -87,9 +87,9 @@ pub struct LogParseResult {
     pub warnings: Vec<LogWarning>,
     /// Timestamps of every journal entry that parsed as an object with a
     /// usable `__REALTIME_TIMESTAMP`, whether or not it became an event.
-    /// Invalid JSON and entries with no usable timestamp are absent, so
-    /// they cannot widen [`crate::ledger::LogCoverage`]. Syslog leaves
-    /// this empty; its coverage is the recognised events.
+    /// Invalid JSON, a repeated key, and entries with no usable timestamp
+    /// are absent, so they cannot widen [`crate::ledger::LogCoverage`].
+    /// Syslog leaves this empty; its coverage is the recognised events.
     #[serde(skip)]
     pub coverage_timestamps: Vec<Timestamp>,
 }

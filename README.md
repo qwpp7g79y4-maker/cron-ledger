@@ -110,6 +110,8 @@ cron-ledger --system-root /nonexistent \
   --crontab /etc/crontab --journal-json /tmp/journal.jsonl --since 7d
 ```
 
+Each line is one JSON object. A line that repeats a key is not evidence: it is skipped and reported as a warning, in the same way as a line that cannot be read. A repeated `MESSAGE`, `SYSLOG_IDENTIFIER`, `__REALTIME_TIMESTAMP`, `_TRANSPORT`, or any other key is enough. The line is not a run and does not extend log coverage.
+
 ### `--json` for scripting/CI
 
 ```sh
@@ -181,6 +183,7 @@ none of the numbers in this README are unmeasured benchmark badges.
 | A monotonic-only trigger (`OnBootSec=`, ...) is flagged `UNSUPPORTED_TRIGGER`, not a crash | `tests/systemd_golden.rs::onbootsec_is_flagged_unsupported_with_no_oncalendar` (`tests/fixtures/systemd/unsupported-trigger.timer`) |
 | Parses Debian/Ubuntu syslog and RHEL/cronie `/var/log/cron` (incl. `CMDOUT`/`CMDEND`): RFC3164, RFC5424, and rsyslog's high-precision file format (a leading RFC3339 timestamp, no priority; numeric offset or `Z`). A traditional or file-format line may start with `<PRI>`. The missing RFC3164 year is inferred across a Dec 31 → Jan 1 boundary | `tests/log_golden.rs` (`tests/fixtures/logs/{debian-syslog,rhel-cron,rfc5424,rsyslog-fileformat,year-boundary}.log`), `src/log/syslog.rs` (`pri_prefixed_rfc3164_cron_line_is_read`, `pri_prefixed_rfc3339_cron_line_is_read`) |
 | Parses `journalctl -o json`: cron `MESSAGE` as a string or byte array, a timer unit's `Started ...` event, a boot only when a kernel banner or an entry from the start of the boot says so, and log coverage across every valid entry | `tests/log_golden.rs::journal_json_matches_golden` (`tests/fixtures/logs/journal.jsonl`), `src/log/journal.rs` boot tests, `tests/ledger_golden.rs` (`journal_entry_after_the_last_event_keeps_a_later_run_missed`, `journal_excerpt_without_boot_evidence_does_not_catch_up_a_persistent_timer`, `kernel_banner_still_catches_up_a_persistent_timer`) |
+| A `journalctl -o json` line that repeats a key is skipped with a warning and is not evidence: no run is recorded and the line does not extend log coverage | `src/log/journal.rs` (`duplicate_message_key_is_not_evidence`, `repeated_key_in_a_journal_object_is_not_evidence`) |
 | An explicitly-named `.gz` log rotation is decompressed transparently | `tests/log_golden.rs::explicit_gz_rotation_is_decompressed_and_parsed` (`tests/fixtures/logs/syslog.2.gz`) |
 | Broken log lines are counted as warnings, never fatal | `tests/log_golden.rs::garbage_lines_are_counted_not_fatal_and_match_golden` (`tests/fixtures/logs/garbage.log`); a non-UTF-8 byte is replaced and the rest of the file is still audited (`src/app.rs::invalid_utf8_in_a_syslog_is_a_warning_and_the_audit_continues`) |
 | A million-line syslog parses within the test's release-mode time budget | `tests/log_golden.rs::one_million_lines_parses_fast_in_release` (budget only asserted with `cargo test --release`; see `tests/fixtures/logs/README.md`) |

@@ -7,12 +7,16 @@
 //! time comes only from an entry that shows it: a kernel banner, or any
 //! entry received within two minutes of `CLOCK_MONOTONIC` zero.
 //! `MESSAGE` may be a JSON string, or (for non-UTF-8 output) a JSON array
-//! of byte values.
+//! of byte values. A repeated key in one object is ambiguous, so that
+//! line is skipped with a warning and is not evidence: it is not a run
+//! and it does not extend log coverage.
 
 use super::event::{EventSource, LogEvent, LogParseResult, LogWarning};
 use jiff::Timestamp;
+use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::fmt;
 
 fn warn(warnings: &mut Vec<LogWarning>, file: &str, line: usize, message: impl Into<String>) {
     warnings.push(LogWarning {
@@ -156,6 +160,95 @@ fn is_pam_session_message(message: &str) -> bool {
     message.starts_with("pam_unix(cron:session):")
 }
 
+/// One journal line, after duplicate keys have been rejected.
+enum JournalLine {
+    Object(serde_json::Map<String, Value>),
+    /// The first repeated key. Later copies are not read.
+    DuplicateKey(String),
+    NotObject,
+}
+
+impl<'de> Deserialize<'de> for JournalLine {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(JournalLineVisitor)
+    }
+}
+
+struct JournalLineVisitor;
+
+impl<'de> Visitor<'de> for JournalLineVisitor {
+    type Value = JournalLine;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a journal JSON value")
+    }
+
+    fn visit_bool<E: de::Error>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_i64<E: de::Error>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_u64<E: de::Error>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_f64<E: de::Error>(self, _value: f64) -> Result<Self::Value, E> {
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_i128<E: de::Error>(self, _value: i128) -> Result<Self::Value, E> {
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_u128<E: de::Error>(self, _value: u128) -> Result<Self::Value, E> {
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_str<E: de::Error>(self, _value: &str) -> Result<Self::Value, E> {
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        while seq.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(JournalLine::NotObject)
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut out = serde_json::Map::new();
+        let mut duplicate = None;
+        while let Some((key, value)) = map.next_entry::<String, Value>()? {
+            if duplicate.is_some() {
+                continue;
+            }
+            if out.contains_key(&key) {
+                duplicate = Some(key);
+                continue;
+            }
+            out.insert(key, value);
+        }
+        Ok(match duplicate {
+            Some(key) => JournalLine::DuplicateKey(key),
+            None => JournalLine::Object(out),
+        })
+    }
+}
+
+/// Read one JSON value. A repeated key is [`JournalLine::DuplicateKey`]
+/// rather than a silently overwritten field.
+fn read_journal_line(line: &str) -> Result<JournalLine, serde_json::Error> {
+    let mut deserializer = serde_json::Deserializer::from_str(line);
+    let parsed = JournalLine::deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    Ok(parsed)
+}
+
 /// Parse `journalctl -o json` NDJSON output into [`LogEvent`]s.
 pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
@@ -171,21 +264,25 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
             continue;
         }
 
-        let value: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
+        let obj = match read_journal_line(line) {
+            Ok(JournalLine::Object(obj)) => obj,
+            Ok(JournalLine::NotObject) => {
+                warn(
+                    &mut warnings,
+                    file,
+                    line_no,
+                    "journal entry is not a JSON object",
+                );
+                continue;
+            }
+            Ok(JournalLine::DuplicateKey(key)) => {
+                warn(&mut warnings, file, line_no, format!("duplicate key {key}"));
+                continue;
+            }
             Err(e) => {
                 warn(&mut warnings, file, line_no, format!("invalid JSON: {e}"));
                 continue;
             }
-        };
-        let Some(obj) = value.as_object() else {
-            warn(
-                &mut warnings,
-                file,
-                line_no,
-                "journal entry is not a JSON object",
-            );
-            continue;
         };
 
         let Some(timestamp) = extract_realtime_timestamp(obj.get("__REALTIME_TIMESTAMP")) else {
@@ -200,8 +297,8 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
 
         // A parsed object with a real timestamp is part of the log span
         // even when it is not a cron, timer, or boot event. Lines that
-        // failed before this point (invalid JSON, not an object, no
-        // usable timestamp) are not.
+        // failed before this point (invalid JSON, not an object, a
+        // repeated key, no usable timestamp) are not.
         coverage_timestamps.push(timestamp);
 
         if let Some(boot_id) = obj.get("_BOOT_ID").and_then(|v| v.as_str()) {
@@ -209,7 +306,7 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
             // the boot time. A later line of the same boot may be the
             // one that does.
             if !seen_boots.contains(boot_id)
-                && (is_kernel_boot_banner(obj) || received_at_boot_start(obj))
+                && (is_kernel_boot_banner(&obj) || received_at_boot_start(&obj))
             {
                 seen_boots.insert(boot_id.to_string());
                 events.push(LogEvent {
@@ -264,7 +361,7 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
                 );
                 continue;
             };
-            let pid = extract_pid(obj);
+            let pid = extract_pid(&obj);
             let source = match action.to_ascii_uppercase().as_str() {
                 "CMD" => Some(EventSource::CronCmd {
                     user,
@@ -616,5 +713,74 @@ mod tests {
         assert_eq!(result.events.len(), 1);
         assert_eq!(result.warnings.len(), 1);
         assert_eq!(result.warnings[0].line, 1);
+    }
+
+    #[test]
+    fn duplicate_message_key_is_not_evidence() {
+        // The second MESSAGE would be a real cron run if the last value
+        // won. A repeated key is ambiguous, so the line is not evidence.
+        // The following line is still read.
+        let content = "\
+{\"__REALTIME_TIMESTAMP\":\"1792465201000000\",\"SYSLOG_IDENTIFIER\":\"CROND\",\"MESSAGE\":\"(root) CMD (/bin/other.sh)\",\"MESSAGE\":\"(root) CMD (/bin/backup.sh)\"}
+{\"__REALTIME_TIMESTAMP\":\"1792465202000000\",\"SYSLOG_IDENTIFIER\":\"CROND\",\"MESSAGE\":\"(root) CMD (/bin/ok.sh)\"}
+";
+        let result = parse_journal_json(content, "journal.json");
+        assert!(
+            !result.events.iter().any(|event| {
+                matches!(
+                    &event.source,
+                    EventSource::CronCmd { command, .. }
+                        if command == "/bin/backup.sh" || command == "/bin/other.sh"
+                )
+            }),
+            "duplicate MESSAGE was used as evidence: {:?}",
+            result.events
+        );
+        assert_eq!(result.events.len(), 1);
+        assert!(matches!(
+            &result.events[0].source,
+            EventSource::CronCmd { command, .. } if command == "/bin/ok.sh"
+        ));
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].line, 1);
+        assert!(
+            result.warnings[0].message.contains("duplicate key"),
+            "{}",
+            result.warnings[0].message
+        );
+        assert!(result.warnings[0].message.contains("MESSAGE"));
+        assert_eq!(result.coverage_timestamps.len(), 1);
+    }
+
+    #[test]
+    fn repeated_key_in_a_journal_object_is_not_evidence() {
+        // Each line would be evidence if the last copy of the key won:
+        // a cron run, a boot, or a timer start.
+        let lines = [
+            r#"{"__REALTIME_TIMESTAMP":"1792465201000000","SYSLOG_IDENTIFIER":"sshd","SYSLOG_IDENTIFIER":"CROND","MESSAGE":"(root) CMD (/bin/backup.sh)"}"#,
+            r#"{"__REALTIME_TIMESTAMP":"0","__REALTIME_TIMESTAMP":"1792465201000000","SYSLOG_IDENTIFIER":"CROND","MESSAGE":"(root) CMD (/bin/backup.sh)"}"#,
+            r#"{"__REALTIME_TIMESTAMP":"1792483800000000","__MONOTONIC_TIMESTAMP":"600000000","_BOOT_ID":"abc","_TRANSPORT":"syslog","_TRANSPORT":"kernel","SYSLOG_IDENTIFIER":"kernel","MESSAGE":"Linux version 6.1.0 (builder@host) (gcc) #1 SMP"}"#,
+            r#"{"__REALTIME_TIMESTAMP":"1792483805000000","__MONOTONIC_TIMESTAMP":"600000000","__MONOTONIC_TIMESTAMP":"5000000","_BOOT_ID":"abc","SYSLOG_IDENTIFIER":"systemd","MESSAGE":"Started Journal Service."}"#,
+            r#"{"__REALTIME_TIMESTAMP":"1792483800000000","__MONOTONIC_TIMESTAMP":"5000000","_BOOT_ID":"old","_BOOT_ID":"new","SYSLOG_IDENTIFIER":"systemd","MESSAGE":"Started Journal Service."}"#,
+            r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"CROND","_PID":"1","_PID":"4242","MESSAGE":"(root) CMD (backup.sh)"}"#,
+            r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"systemd","UNIT":"other.service","UNIT":"backup.service","MESSAGE":"Started Nightly backup."}"#,
+            r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"systemd","_SYSTEMD_UNIT":"init.scope","_SYSTEMD_UNIT":"backup.service","MESSAGE":"Started Nightly backup."}"#,
+            r#"{"__REALTIME_TIMESTAMP":"1792897201000000","SYSLOG_IDENTIFIER":"CROND","_UID":"0","_UID":"1","MESSAGE":"(root) CMD (backup.sh)"}"#,
+        ];
+        for line in lines {
+            let result = parse_journal_json(line, "journal.json");
+            assert!(
+                result.events.is_empty(),
+                "{line} was used as evidence: {:?}",
+                result.events
+            );
+            assert_eq!(result.warnings.len(), 1, "{line}");
+            assert!(
+                result.warnings[0].message.contains("duplicate key"),
+                "{line}: {}",
+                result.warnings[0].message
+            );
+            assert!(result.coverage_timestamps.is_empty(), "{line}");
+        }
     }
 }
