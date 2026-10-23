@@ -12,22 +12,18 @@ pub enum JobKey {
     Timer { unit: String },
 }
 
-/// Normalize a command for matching: collapse runs of whitespace to a
-/// single space, trim the ends, and unescape `\%` to `%`. This is
-/// deliberately conservative — it does not touch quoting, environment
-/// expansion, or argument order — since cron logs the command verbatim
-/// and this project has no shell to run it through.
+/// Normalize a command for matching: trim the ends and unescape `\%` to
+/// `%`. Whitespace inside the command is kept, including inside quoted
+/// arguments. Cron keeps that whitespace, so collapsing it would merge
+/// commands that differ. This does not touch quoting, environment
+/// expansion, or argument order.
 ///
-/// The `\%` unescaping matters because the two sides of a match disagree
-/// on it otherwise: the crontab parser already unescapes `\%` to `%` when
-/// it splits the command from its stdin data, but a cron log line echoes
-/// the command as written in the crontab, backslash and all.
+/// Unescaping `\%` covers a log line that still has the crontab spelling.
+/// The parser has already turned `\%` into `%` while splitting stdin off
+/// the command. Cron's own `CMD` line is logged after that same split, so
+/// it already contains `%`; a line copied from the crontab text may not.
 pub fn normalize_command(command: &str) -> String {
-    command
-        .replace(r"\%", "%")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    command.replace(r"\%", "%").trim().to_string()
 }
 
 #[cfg(test)]
@@ -35,8 +31,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_collapses_whitespace() {
-        assert_eq!(normalize_command("  echo   hi  "), "echo hi");
+    fn normalize_trims_boundaries_and_keeps_internal_whitespace() {
+        // Only the boundaries are trimmed. Whitespace inside the command,
+        // including inside a quoted argument, is preserved.
+        assert_eq!(normalize_command("  echo hi  "), "echo hi");
+        assert_eq!(
+            normalize_command("echo \"hello  world\""),
+            "echo \"hello  world\""
+        );
     }
 
     #[test]

@@ -1,42 +1,76 @@
-//! vixie-cron's `%` handling: an unescaped `%` in the command field splits
-//! the real command from data piped to it on stdin, and every later
-//! unescaped `%` becomes a newline within that stdin data. `\%` is a literal
-//! `%` with the backslash removed.
+//! vixie-cron's `%` handling, matching cronie's `do_command()`.
+//!
+//! An unescaped `%` splits the command from the text piped to it on
+//! stdin. A backslash escapes only the next character, and only `%` is
+//! special. In the command, an even run of backslashes before `%` leaves
+//! that `%` as the separator and keeps every backslash; an odd run
+//! escapes the `%` (one backslash is consumed, the others stay) and does
+//! not split.
+//!
+//! The stdin text uses cronie's second loop, which is not the same
+//! rule: `\%` becomes `%`, a bare `%` becomes a newline, and `\\%`
+//! becomes one literal backslash followed by a literal percent. A
+//! backslash that escapes another backslash leaves that second
+//! backslash armed for the character after it.
 
 /// Split a raw command field into the command to run and, if any unescaped
-/// `%` was present, the text to feed it on stdin.
+/// `%` was present, the text to feed it on stdin. See the module comment
+/// for the command/stdin difference.
 pub fn split_command_stdin(raw: &str) -> (String, Option<String>) {
     let mut command = String::new();
-    let mut stdin_buf = String::new();
-    let mut in_stdin = false;
-    let mut chars = raw.chars().peekable();
+    let mut escaped = false;
 
-    while let Some(c) = chars.next() {
-        if c == '\\' && chars.peek() == Some(&'%') {
-            chars.next();
-            if in_stdin {
-                stdin_buf.push('%');
-            } else {
-                command.push('%');
+    for (idx, c) in raw.char_indices() {
+        if escaped {
+            escaped = false;
+            if c != '%' {
+                command.push('\\');
             }
+            command.push(c);
+            continue;
+        }
+        if c == '\\' {
+            escaped = true;
             continue;
         }
         if c == '%' {
-            if in_stdin {
-                stdin_buf.push('\n');
-            } else {
-                in_stdin = true;
-            }
-            continue;
+            let rest = &raw[idx + c.len_utf8()..];
+            return (command, Some(translate_stdin(rest)));
         }
-        if in_stdin {
-            stdin_buf.push(c);
-        } else {
-            command.push(c);
-        }
+        command.push(c);
+    }
+    if escaped {
+        command.push('\\');
     }
 
-    (command, if in_stdin { Some(stdin_buf) } else { None })
+    (command, None)
+}
+
+/// Cronie's stdin copier (`do_command.c`, the loop that writes the
+/// grandchild's stdin). `\%` becomes `%`, `%` becomes a newline, and
+/// `\x` stays `\x` for every other `x`. Escaping a backslash emits one
+/// backslash and leaves the second one armed, so `\\%` is `\%`, not a
+/// newline.
+fn translate_stdin(raw: &str) -> String {
+    let mut out = String::new();
+    let mut escaped = false;
+    for mut ch in raw.chars() {
+        if escaped {
+            if ch != '%' {
+                out.push('\\');
+            }
+        } else if ch == '%' {
+            ch = '\n';
+        }
+        escaped = ch == '\\';
+        if !escaped {
+            out.push(ch);
+        }
+    }
+    if escaped {
+        out.push('\\');
+    }
+    out
 }
 
 #[cfg(test)]
@@ -82,6 +116,52 @@ mod tests {
         assert_eq!(
             split_command_stdin(r"echo a\nb"),
             (r"echo a\nb".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn lone_trailing_backslash_is_kept_literal() {
+        assert_eq!(
+            split_command_stdin(r"echo a\"),
+            (r"echo a\".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn paired_backslashes_cancel_and_percent_still_splits() {
+        // Two backslashes before `%` cancel each other out in cronie's
+        // do_command(): the second backslash is the one that is
+        // "escaped", not the `%`, so the `%` still separates command
+        // from stdin.
+        assert_eq!(
+            split_command_stdin(r"echo a\\%hello"),
+            (r"echo a\\".to_string(), Some("hello".to_string()))
+        );
+    }
+
+    #[test]
+    fn three_backslashes_before_percent_leave_it_escaped() {
+        // Three backslashes are one escaped backslash plus one escape
+        // for `%`. The `%` stays literal, so nothing is split off, and
+        // the command keeps the remaining two backslashes.
+        assert_eq!(
+            split_command_stdin(r"echo a\\\%hello"),
+            (r"echo a\\%hello".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn paired_backslashes_in_stdin_stay_a_literal_percent() {
+        // After the split, cronie's second loop does not treat `\\%`
+        // as two literal backslashes plus a newline. The second
+        // backslash stays armed and escapes the percent.
+        assert_eq!(
+            split_command_stdin(r"echo%a\\%b"),
+            ("echo".to_string(), Some(r"a\%b".to_string()))
+        );
+        assert_eq!(
+            split_command_stdin(r"echo%a\\\\%b"),
+            ("echo".to_string(), Some(r"a\\\%b".to_string()))
         );
     }
 }

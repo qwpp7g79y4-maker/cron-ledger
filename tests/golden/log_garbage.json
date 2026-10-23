@@ -28,11 +28,6 @@
   "warnings": [
     {
       "file": "garbage.log",
-      "line": 2,
-      "message": "'this' is not a month name"
-    },
-    {
-      "file": "garbage.log",
       "line": 3,
       "message": "'CRON' line has no '(user) ACTION (arg)' body"
     },

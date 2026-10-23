@@ -30,8 +30,9 @@ pub enum EventSource {
         pid: Option<u32>,
         command: String,
     },
-    /// A systemd timer-activated service starting, from the journal's own
-    /// `Started ...` message for the unit named in `_SYSTEMD_UNIT`/`UNIT`.
+    /// A systemd timer-activated service starting, from the manager's own
+    /// `Started ...` message (`SYSLOG_IDENTIFIER=systemd`). The subject
+    /// unit is `UNIT` when present, otherwise `_SYSTEMD_UNIT`.
     SystemdUnitStart { unit: String },
     /// A boot, inferred from a new `_BOOT_ID` appearing in the journal.
     /// Used only for `@reboot` jobs' informational `REBOOT_ONLY` status.

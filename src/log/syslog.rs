@@ -281,17 +281,23 @@ pub fn parse_syslog_cron(
             continue;
         }
 
+        // Decide whether this is a cron line before complaining about
+        // the timestamp. Unrelated non-PRI traffic (and lines that are
+        // not RFC3164 at all) is skipped. A recognized CRON/CROND entry
+        // still warns when its timestamp does not parse.
         let Some((fields, rest)) = split_ws_fields(line, 4) else {
-            warn(
-                &mut warnings,
-                file,
-                line_no,
-                "line is too short to be syslog",
-            );
             continue;
         };
-        let (mon, day, time) = (fields[0], fields[1], fields[2]);
+        let Some((tag, message)) = split_tag(rest) else {
+            continue;
+        };
+        let (name, pid) = parse_tag(tag);
+        let outcome = classify(name, pid, message);
+        if matches!(outcome, Outcome::Skip) {
+            continue;
+        }
 
+        let (mon, day, time) = (fields[0], fields[1], fields[2]);
         let Some(month) = month_number(mon) else {
             warn(
                 &mut warnings,
@@ -331,15 +337,7 @@ pub fn parse_syslog_cron(
             continue;
         };
 
-        let Some((tag, message)) = split_tag(rest) else {
-            // No `TAG[pid]:` marker at all: not a cron line, and
-            // plausibly not even a syslog line. Skip rather than warn,
-            // since most syslog traffic isn't cron's.
-            continue;
-        };
-        let (name, pid) = parse_tag(tag);
-
-        match classify(name, pid, message) {
+        match outcome {
             Outcome::Event(source) => {
                 let Some(timestamp) = years.resolve(month, day, h, m, s) else {
                     warn(
@@ -544,6 +542,33 @@ Jan  1 00:01:00 host CRON[2]: (alice) CMD (x)
         assert_eq!(result.events, vec![]);
         assert_eq!(result.warnings.len(), 1);
         assert_eq!(result.warnings[0].line, 1);
+    }
+
+    #[test]
+    fn unrelated_line_does_not_warn_about_the_month_a_cron_line_still_does() {
+        // "this line..." and the sshd line are not cron. The CRON line
+        // is, so its bad month is still a warning, and the good line
+        // is still an event.
+        let content = "\
+this line is not syslog at all
+NotAMonth 99 99:99:99 web1 sshd[9]: Accepted
+NotAMonth 99 99:99:99 web1 CRON[4]: (alice) CMD (echo hi)
+Oct 20 03:00:01 web1 CRON[5]: (alice) CMD (echo ok)
+";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].line, 3);
+        assert!(result.warnings[0].message.contains("NotAMonth"));
+        assert_eq!(result.events.len(), 1);
+        assert_eq!(
+            result.events[0].source,
+            EventSource::CronCmd {
+                user: "alice".to_string(),
+                pid: Some(5),
+                command: "echo ok".to_string(),
+            }
+        );
     }
 
     #[test]

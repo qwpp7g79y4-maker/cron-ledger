@@ -75,6 +75,47 @@ fn duplicate_command_two_users_matches_independently() {
 }
 
 #[test]
+fn two_jobs_sharing_a_key_do_not_double_count_the_same_run() {
+    // Two schedule lines for the identical (user, command) -- e.g. the
+    // same job present in both /etc/crontab and a cron.d file -- must
+    // not let one real execution count as a hit for both of them.
+    let job_a = cron_job("root", "backup.sh", vec![ts("2026-10-20T03:00:00Z")]);
+    let job_b = cron_job("root", "backup.sh", vec![ts("2026-10-20T03:02:00Z")]);
+    let events = vec![
+        // Unrelated events only to widen the log coverage window so
+        // 03:00 reads as MISSED, not NO_TRACE.
+        cmd_event("syslog", 1, "2026-10-20T00:00:00Z", "root", "unrelated"),
+        cmd_event("syslog", 2, "2026-10-20T06:00:00Z", "root", "unrelated"),
+        // The one real run, within tolerance of both expected times.
+        cmd_event("syslog", 3, "2026-10-20T03:01:30Z", "root", "backup.sh"),
+    ];
+
+    let ledger = build_ledger(&[job_a, job_b], &events);
+    assert_eq!(ledger.entries.len(), 2);
+
+    let JobOutcome::Standard(a) = &ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    let JobOutcome::Standard(b) = &ledger.entries[1].outcome else {
+        panic!("expected a standard outcome");
+    };
+    // The matcher is still the same greedy, order-dependent heuristic
+    // as a single job's (chronologically earlier expected times are
+    // served first in pass 1), not an optimal assignment: job_a's
+    // earlier expected time claims the run here. What matters for this
+    // test is that exactly one of the two claims it, not both.
+    assert_eq!(a[0].status, Status::Ok);
+    assert_eq!(a[0].actual, Some(ts("2026-10-20T03:01:30Z")));
+    assert_eq!(b[0].status, Status::Missed);
+    assert!(b[0].actual.is_none());
+
+    assert!(ledger
+        .warnings
+        .iter()
+        .any(|w| w.contains("root: backup.sh") && w.contains("share this command")));
+}
+
+#[test]
 fn percent_command_job_matches_on_the_split_command() {
     // A command containing %: the crontab parser already
     // splits the command from its %-separated stdin; the matcher must key

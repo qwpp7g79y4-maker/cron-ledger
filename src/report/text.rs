@@ -10,11 +10,27 @@ use crate::ledger::{JobKey, JobOutcome, Ledger, Status};
 
 use super::{job_views, JobView, ReportContext};
 
+/// Make crontab text, paths, and log excerpts safe to print on a
+/// terminal. Control characters (including ESC) become a visible
+/// `\u{...}` form. Color sequences added later by [`colored_status`]
+/// are not passed through here.
+fn neutralize_controls(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_control() {
+            let _ = write!(out, "\\u{{{:x}}}", u32::from(c));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn job_label(key: &JobKey) -> String {
-    match key {
+    neutralize_controls(&match key {
         JobKey::Cron { user, command } => format!("{user}: {command}"),
         JobKey::Timer { unit } => unit.clone(),
-    }
+    })
 }
 
 fn status_word(status: Status) -> &'static str {
@@ -59,9 +75,9 @@ fn render_job_block(out: &mut String, view: &JobView, ctx: &ReportContext, color
         out,
         "{} ({}:{}) [{}]",
         job_label(view.key),
-        view.file,
+        neutralize_controls(view.file),
         view.line,
-        view.schedule
+        neutralize_controls(&view.schedule)
     );
     match view.outcome {
         JobOutcome::Standard(_) => {
@@ -198,9 +214,66 @@ pub fn render_text(ledger: &Ledger, ctx: &ReportContext, color: bool) -> String 
     if !all_warnings.is_empty() {
         out.push_str("Waarschuwingen:\n");
         for w in all_warnings {
-            let _ = writeln!(out, "  - {w}");
+            let _ = writeln!(out, "  - {}", neutralize_controls(w));
         }
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ledger::{JobKey, JobLedgerEntry, JobOutcome, Ledger, LogCoverage};
+    use crate::report::{render_json, ReportContext};
+    use jiff::tz::TimeZone;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    #[test]
+    fn text_report_neutralizes_controls_and_json_keeps_them() {
+        let command = "echo \u{1b}[2Ahidden";
+        let key = JobKey::Cron {
+            user: "root".to_string(),
+            command: command.to_string(),
+        };
+        let ledger = Ledger {
+            entries: vec![JobLedgerEntry {
+                key: key.clone(),
+                file: "cron\u{1b}[0md".to_string(),
+                line: 1,
+                outcome: JobOutcome::Reboot { boots: vec![] },
+            }],
+            log_coverage: LogCoverage::default(),
+            warnings: vec!["bad \u{1b}[31mline".to_string()],
+        };
+        let tz = TimeZone::UTC;
+        let descriptions = HashMap::from([(key, "0 \u{1b}[0m * * * *".to_string())]);
+        let ctx = ReportContext {
+            since: "2026-10-20T00:00:00Z".parse().unwrap(),
+            until: "2026-10-21T00:00:00Z".parse().unwrap(),
+            tz: &tz,
+            tolerance: Duration::from_secs(300),
+            descriptions: &descriptions,
+            extra_warnings: &[],
+        };
+
+        let text = render_text(&ledger, &ctx, false);
+        // The report's own line breaks are the only control characters
+        // left. ESC from the command, path, schedule, and warning is not.
+        assert!(text.chars().filter(|c| c.is_control()).all(|c| c == '\n'));
+        assert!(!text.contains('\u{1b}'));
+        assert!(text.contains("\\u{1b}"));
+
+        // Color codes are added after neutralization, so they still
+        // reach the terminal, and the command's own ESC does not.
+        let colored = render_text(&ledger, &ctx, true);
+        assert!(colored.contains("\u{1b}[36m"));
+        assert!(!colored.contains("\u{1b}[2A"));
+
+        let json = render_json(&ledger, &ctx);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["jobs"][0]["key"]["Cron"]["command"], command);
+        assert_eq!(parsed["jobs"][0]["schedule"], "0 \u{1b}[0m * * * *");
+    }
 }

@@ -315,7 +315,10 @@ mod tests {
     }
 
     #[test]
-    fn tz_and_cron_tz_apply_to_later_lines_cron_tz_wins() {
+    fn tz_is_recorded_but_does_not_govern_the_schedule() {
+        // TZ= only reaches the job's own environment in cronie; it never
+        // changes how cron interprets the schedule. CRON_TZ= is the only
+        // env line that does.
         let content = "\
 TZ=UTC
 * * * * * echo a
@@ -324,7 +327,8 @@ CRON_TZ=Europe/Amsterdam
 ";
         let result = parse_user_crontab(content, "f", None);
         assert_eq!(result.jobs.len(), 2);
-        assert_eq!(result.jobs[0].effective_tz(), Some("UTC"));
+        assert_eq!(result.jobs[0].tz.as_deref(), Some("UTC"));
+        assert_eq!(result.jobs[0].effective_tz(), None);
         assert_eq!(result.jobs[1].tz.as_deref(), Some("UTC"));
         assert_eq!(result.jobs[1].cron_tz.as_deref(), Some("Europe/Amsterdam"));
         assert_eq!(result.jobs[1].effective_tz(), Some("Europe/Amsterdam"));

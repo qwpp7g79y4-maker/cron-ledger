@@ -6,7 +6,7 @@ Een gratis, open-source, alleen-lezen opdrachtregelprogramma in Rust. Het leest 
 
 Versie **0.1.0**. Licentie: `MIT OR Apache-2.0`.
 
-De uitvoer van de tool is Engels; de voorbeelden hieronder tonen die precies zoals de binary hem schrijft.
+De tekstuitvoer gebruikt Nederlandse en Engelse labels door elkaar; de voorbeelden hieronder tonen die precies zoals de binary hem schrijft.
 
 ## Installatie
 
