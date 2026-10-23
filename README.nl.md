@@ -33,6 +33,10 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
 ```
 
 `-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`. Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` zet die scan al uit, dus dat pad wordt niet gelezen. Het blijft in het voorbeeld staan zodat het weglaten van de bronvlag je eigen `/etc/crontab` en `/etc/cron.d/*` niet meeneemt.
+De paden `tests/fixtures/` hieronder bestaan alleen in een kloon van
+deze repository (`git clone`, daarna `cargo install --path .`). Na
+`cargo install cron-ledger` geef je je eigen bestanden mee met
+`--crontab` en `--syslog`.
 
 ### Systeemcrontab (`--crontab`, en de standaardscan van `--system-root`)
 

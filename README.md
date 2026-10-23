@@ -45,6 +45,10 @@ the examples pin `--system-root /nonexistent`. An explicit `--crontab`,
 `--crontab-user`, or `--timer-unit` already turns that scan off, so the
 path is not read. It stays in the example so dropping the source flag
 cannot pick up your own machine's `/etc/crontab` and `/etc/cron.d/*`.
+The `tests/fixtures/` paths below exist only in a clone of this
+repository (`git clone`, then `cargo install --path .`). After
+`cargo install cron-ledger`, pass your own files with `--crontab` and
+`--syslog`.
 
 ### System crontab (`--crontab`, and the `--system-root` default scan)
 

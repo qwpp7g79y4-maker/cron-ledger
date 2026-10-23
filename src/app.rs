@@ -271,9 +271,21 @@ fn classify_cron_d_file_name(name: &str) -> CronDFileName {
 /// not trusted to be free of those. `recurse` is for `var/spool/cron/**`.
 /// `/etc/cron.d` is one directory: cron does not run a file in a
 /// subdirectory.
-fn collect_files(dir: &Path, recurse: bool, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+///
+/// Each directory that cannot be listed is returned with that error.
+/// The caller warns. Other entries are still collected.
+fn collect_files(
+    dir: &Path,
+    recurse: bool,
+    out: &mut Vec<PathBuf>,
+) -> Vec<(PathBuf, std::io::Error)> {
+    let mut unread = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            unread.push((dir.to_path_buf(), e));
+            return unread;
+        }
     };
     let mut children: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
     children.sort();
@@ -289,11 +301,12 @@ fn collect_files(dir: &Path, recurse: bool, out: &mut Vec<PathBuf>) {
                 out.push(child);
             }
         } else if recurse && meta.is_dir() {
-            collect_files(&child, true, out);
+            unread.extend(collect_files(&child, true, out));
         } else if meta.is_file() {
             out.push(child);
         }
     }
+    unread
 }
 
 /// Build the ledger for `cli`, using `now` as "the current time" for a
@@ -349,8 +362,8 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     // --crontab-user, or --timer-unit is the whole set of jobs: also
     // walking the root would schedule a file the user already named a
     // second time. Naming --system-root by itself still scans that
-    // directory. A missing path stays silent; an unreadable file is a
-    // warning, never a hard error.
+    // directory. A missing path stays silent; an unreadable file or
+    // directory is a warning, never a hard error.
     let named_job_source =
         !cli.crontabs.is_empty() || !cli.crontab_users.is_empty() || !cli.timer_units.is_empty();
     if !named_job_source {
@@ -370,7 +383,9 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         let cron_d = root.join("etc/cron.d");
         if cron_d.is_dir() {
             let mut files = Vec::new();
-            collect_files(&cron_d, false, &mut files);
+            for (path, e) in collect_files(&cron_d, false, &mut files) {
+                c.warnings.push(format!("{}: {e}", path.display()));
+            }
             for file in files {
                 let name = match file.file_name().and_then(|n| n.to_str()) {
                     Some(name) => name,
@@ -402,7 +417,9 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         let spool = root.join("var/spool/cron");
         if spool.is_dir() {
             let mut files = Vec::new();
-            collect_files(&spool, true, &mut files);
+            for (path, e) in collect_files(&spool, true, &mut files) {
+                c.warnings.push(format!("{}: {e}", path.display()));
+            }
             for file in files {
                 let user = file
                     .file_name()
@@ -1371,6 +1388,66 @@ mod tests {
             ]
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Puts `locked` back to mode 755 and removes `root`, including when
+    /// the test fails while the directory is still mode 000.
+    #[cfg(unix)]
+    struct ResetMode {
+        root: PathBuf,
+        locked: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl Drop for ResetMode {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.locked, std::fs::Permissions::from_mode(0o755));
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_spool_directory_is_a_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "cron-ledger-app-unreadable-spool-{}",
+            std::process::id()
+        ));
+        let crontabs = root.join("var/spool/cron/crontabs");
+        std::fs::create_dir_all(&crontabs).unwrap();
+        let _guard = ResetMode {
+            root: root.clone(),
+            locked: crontabs.clone(),
+        };
+        std::fs::write(
+            crontabs.join("alice"),
+            "0 5 * * * /usr/local/bin/alice.sh\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&crontabs, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root can list a mode 000 directory, so the warning would not
+        // appear. Skip rather than fail.
+        if std::fs::read_dir(&crontabs).is_ok() {
+            return;
+        }
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: root,
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let path = crontabs.display().to_string();
+        assert!(
+            audit.extra_warnings.iter().any(|w| w.contains(&path)),
+            "expected a warning for {path}, got {:?}",
+            audit.extra_warnings
+        );
     }
 
     #[cfg(unix)]
