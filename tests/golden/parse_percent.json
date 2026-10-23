@@ -15,7 +15,9 @@
           },
           "dom": "Star",
           "month": "Star",
-          "dow": "Star"
+          "dow": "Star",
+          "dom_star": true,
+          "dow_star": true
         }
       },
       "tz": null,
@@ -41,7 +43,9 @@
           },
           "dom": "Star",
           "month": "Star",
-          "dow": "Star"
+          "dow": "Star",
+          "dom_star": true,
+          "dow_star": true
         }
       },
       "tz": null,

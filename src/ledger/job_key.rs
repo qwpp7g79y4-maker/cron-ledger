@@ -13,12 +13,21 @@ pub enum JobKey {
 }
 
 /// Normalize a command for matching: collapse runs of whitespace to a
-/// single space and trim the ends. This is deliberately conservative — it
-/// does not touch quoting, environment expansion, or argument order —
-/// since cron logs the command verbatim and this project has no shell to
-/// run it through.
+/// single space, trim the ends, and unescape `\%` to `%`. This is
+/// deliberately conservative — it does not touch quoting, environment
+/// expansion, or argument order — since cron logs the command verbatim
+/// and this project has no shell to run it through.
+///
+/// The `\%` unescaping matters because the two sides of a match disagree
+/// on it otherwise: the crontab parser already unescapes `\%` to `%` when
+/// it splits the command from its stdin data, but a cron log line echoes
+/// the command as written in the crontab, backslash and all.
 pub fn normalize_command(command: &str) -> String {
-    command.split_whitespace().collect::<Vec<_>>().join(" ")
+    command
+        .replace(r"\%", "%")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -28,6 +37,11 @@ mod tests {
     #[test]
     fn normalize_collapses_whitespace() {
         assert_eq!(normalize_command("  echo   hi  "), "echo hi");
+    }
+
+    #[test]
+    fn normalize_unescapes_percent() {
+        assert_eq!(normalize_command(r"date +\%F"), "date +%F");
     }
 
     #[test]

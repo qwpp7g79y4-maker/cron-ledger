@@ -61,7 +61,14 @@ pub fn expand(
         if months.contains(&u32::from(date.month() as u8)) {
             let dom = u32::from(date.day() as u8);
             let dow = u32::from(date.weekday().to_sunday_zero_offset() as u8);
-            if matches_day(&schedule.dom, &schedule.dow, dom, dow) {
+            if matches_day(
+                &schedule.dom,
+                &schedule.dow,
+                schedule.dom_star,
+                schedule.dow_star,
+                dom,
+                dow,
+            ) {
                 // Every fixed-hour tick that falls in the same day's
                 // spring-forward gap is collected here first (in
                 // ascending civil-time order, since `hours`/`minutes` are
@@ -179,7 +186,6 @@ mod tests {
     use crate::crontab::parse_user_crontab;
     use crate::crontab::ScheduleKind;
     use jiff::civil::date;
-    use proptest::strategy::Strategy;
 
     fn schedule_of(line: &str) -> Schedule {
         let result = parse_user_crontab(line, "f", None);
@@ -336,6 +342,26 @@ mod tests {
     }
 
     #[test]
+    fn dom_step_field_stays_unrestricted_for_the_and_rule() {
+        // "0 0 */2 * 1": crontab(5) says the day-of-month/day-of-week OR
+        // rule applies only to fields that "don't start with *" -- `*/2`
+        // starts with `*`, so it stays unrestricted for that rule, and
+        // the AND rule applies instead: only odd days that are also
+        // Mondays, not every odd day plus every Monday.
+        let tz = TimeZone::UTC;
+        let schedule = schedule_of("0 0 */2 * 1 echo hi\n");
+        let (since, until) = window(&tz, date(2026, 1, 1), 28);
+        let got = expand(&schedule, &tz, since, until);
+        for t in &got {
+            let d = t.to_zoned(tz.clone()).date();
+            assert!(
+                d.day() % 2 == 1 && d.weekday() == jiff::civil::Weekday::Monday,
+                "{d} is not both an odd day and a Monday"
+            );
+        }
+    }
+
+    #[test]
     fn times_are_strictly_increasing_for_a_busy_schedule() {
         let tz = TimeZone::get("Europe/Amsterdam").unwrap();
         // Covers both 2026 DST transitions in one window.
@@ -357,20 +383,27 @@ mod tests {
     }
 
     fn arb_schedule() -> impl proptest::strategy::Strategy<Value = Schedule> {
+        use proptest::prelude::*;
         (
             arb_field(0, 59),
             arb_field(0, 23),
             arb_field(1, 31),
             arb_field(1, 12),
             arb_field(0, 6),
+            any::<bool>(),
+            any::<bool>(),
         )
-            .prop_map(|(minute, hour, dom, month, dow)| Schedule {
-                minute,
-                hour,
-                dom,
-                month,
-                dow,
-            })
+            .prop_map(
+                |(minute, hour, dom, month, dow, dom_star, dow_star)| Schedule {
+                    minute,
+                    hour,
+                    dom,
+                    month,
+                    dow,
+                    dom_star,
+                    dow_star,
+                },
+            )
     }
 
     proptest::proptest! {
