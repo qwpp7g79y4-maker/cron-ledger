@@ -2,7 +2,7 @@
 //! ledger: one entry per job, each either a set of matched run outcomes,
 //! a `@reboot` job's found boots, or a timer flagged `UNSUPPORTED_TRIGGER`.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::time::Duration;
 
 use jiff::Timestamp;
@@ -120,22 +120,41 @@ fn job_key_label(key: &JobKey) -> String {
     }
 }
 
-/// Build the ledger, taking the log span from `events` themselves.
+/// Build the ledger, taking coverage from `events` themselves.
 ///
 /// That is the right span for syslog, where a line that is not a
 /// recognised cron record is skipped and has no timestamp of its own.
-/// Journal input has a wider span — every entry with a real timestamp,
-/// recognised or not — and should use [`build_ledger_with_coverage`].
+/// Each distinct `event.file` is its own closed span. A gap between
+/// two files is not covered. Journal input has a wider span — every
+/// entry with a real timestamp, recognised or not — so build one span
+/// per journal file with [`build_ledger_with_coverage`] inputs and
+/// merge those spans instead of flattening every timestamp into one.
 pub fn build_ledger(jobs: &[ScheduledJob], events: &[LogEvent]) -> Ledger {
-    build_ledger_with_coverage(jobs, events, events.iter().map(|e| e.timestamp))
+    let mut per_file: BTreeMap<&str, Vec<Timestamp>> = BTreeMap::new();
+    for event in events {
+        per_file
+            .entry(event.file.as_str())
+            .or_default()
+            .push(event.timestamp);
+    }
+    let coverage = per_file
+        .into_values()
+        .fold(LogCoverage::default(), |acc, stamps| {
+            acc.merge(LogCoverage::from_timestamps(stamps))
+        });
+    build_ledger_from_coverage(jobs, events, coverage)
 }
 
 /// Build the ledger: match every job's expected run times against the
-/// events that identify it. `coverage_timestamps` is the span of the
-/// logs, earliest valid line to latest, and is what tells `MISSED` apart
-/// from `NO_TRACE`. For a journal this is every entry with a parseable
-/// `__REALTIME_TIMESTAMP`, including lines that are not a recognised
-/// event. Invalid lines are left out by the caller.
+/// events that identify it. `coverage_timestamps` is one span, earliest
+/// valid line to latest, and is what tells `MISSED` apart from
+/// `NO_TRACE` for that one input. For a journal this is every entry
+/// with a parseable `__REALTIME_TIMESTAMP`, including lines that are
+/// not a recognised event. Invalid lines are left out by the caller.
+/// This function makes one span. To keep a separate span per file,
+/// merge one [`LogCoverage`] per file with [`LogCoverage::merge`]
+/// before matching; flattening every file into this timestamp list
+/// would cover the hole between them.
 ///
 /// Jobs that normalize to the same [`JobKey`] (the same cron command
 /// scheduled more than once, say from two files) are matched together
@@ -150,8 +169,22 @@ pub fn build_ledger_with_coverage(
     events: &[LogEvent],
     coverage_timestamps: impl IntoIterator<Item = Timestamp>,
 ) -> Ledger {
-    let log_coverage = LogCoverage::from_timestamps(coverage_timestamps);
+    build_ledger_from_coverage(
+        jobs,
+        events,
+        LogCoverage::from_timestamps(coverage_timestamps),
+    )
+}
 
+/// Like [`build_ledger_with_coverage`], but the caller has already
+/// decided the spans. Pass one merged [`LogCoverage`] whose ranges are
+/// the per-file spans; do not flatten every file into one timestamp list
+/// first, or a hole between files becomes covered.
+pub(crate) fn build_ledger_from_coverage(
+    jobs: &[ScheduledJob],
+    events: &[LogEvent],
+    log_coverage: LogCoverage,
+) -> Ledger {
     let mut cron_events: HashMap<JobKey, Vec<&LogEvent>> = HashMap::new();
     let mut timer_starts: HashMap<String, Vec<Timestamp>> = HashMap::new();
     let mut boots: Vec<Timestamp> = Vec::new();

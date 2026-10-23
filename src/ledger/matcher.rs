@@ -37,16 +37,35 @@ use std::time::Duration;
 
 use super::status::Status;
 
-/// The timespan the logs actually cover: from the first log line to the
-/// last, regardless of which job (or no job at all) it was evidence for.
-/// Empty if there were no log lines at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+/// The times the logs actually cover.
+///
+/// Each input file contributes one closed span, from its own earliest
+/// coverage timestamp to its own latest. A hole between two files is
+/// not covered: a missing rotation is not proof that a job failed to
+/// run. Within one file the span is continuous, so an expected time
+/// between that file's first and last line is covered even when no
+/// line falls on that instant. Cron lines are sparse; a quiet stretch
+/// inside one file is not itself a hole.
+///
+/// `first` and `last` are the earliest and latest timestamps across
+/// every file. The JSON report prints those outer bounds. [`Self::covers`]
+/// is true only inside some file's own span, so a timestamp between
+/// `first` and `last` can still be uncovered.
+///
+/// Empty when there were no coverage timestamps at all.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct LogCoverage {
     pub first: Option<Timestamp>,
     pub last: Option<Timestamp>,
+    /// One closed range per input file. Absent from the JSON report.
+    #[serde(skip)]
+    ranges: Vec<(Timestamp, Timestamp)>,
 }
 
 impl LogCoverage {
+    /// One span covering every timestamp. Empty input is empty coverage.
+    /// This is the span of a single input file, not of every file the
+    /// audit read: combine files with [`Self::merge`].
     pub fn from_timestamps(timestamps: impl IntoIterator<Item = Timestamp>) -> Self {
         let mut first = None;
         let mut last = None;
@@ -54,19 +73,75 @@ impl LogCoverage {
             first = Some(first.map_or(ts, |f: Timestamp| f.min(ts)));
             last = Some(last.map_or(ts, |l: Timestamp| l.max(ts)));
         }
-        LogCoverage { first, last }
+        match (first, last) {
+            (Some(first), Some(last)) => LogCoverage {
+                first: Some(first),
+                last: Some(last),
+                ranges: vec![(first, last)],
+            },
+            _ => LogCoverage::default(),
+        }
+    }
+
+    /// Coverage of both inputs. Spans are kept separate, so a gap
+    /// between `self` and `other` stays uncovered.
+    pub fn merge(mut self, other: Self) -> Self {
+        if self.ranges.is_empty() {
+            self.ranges.extend(match (self.first, self.last) {
+                (Some(first), Some(last)) => Some((first, last)),
+                _ => None,
+            });
+        }
+        if other.ranges.is_empty() {
+            self.ranges.extend(match (other.first, other.last) {
+                (Some(first), Some(last)) => Some((first, last)),
+                _ => None,
+            });
+        } else {
+            self.ranges.extend(other.ranges);
+        }
+        self.first = match (self.first, other.first) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (first, other_first) => first.or(other_first),
+        };
+        self.last = match (self.last, other.last) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (last, other_last) => last.or(other_last),
+        };
+        self
     }
 
     pub fn is_empty(&self) -> bool {
         self.first.is_none()
     }
 
-    /// Whether `t` falls inside `[first, last]`. Always `false` when the
-    /// logs are empty, by construction — never `true` on an empty
-    /// coverage window.
+    /// Closed spans, one per input file, sorted by start then end.
+    /// A hand-built value that only sets `first` and `last` is one span.
+    pub fn spans(&self) -> Vec<(Timestamp, Timestamp)> {
+        let mut spans = if !self.ranges.is_empty() {
+            self.ranges.clone()
+        } else if let (Some(first), Some(last)) = (self.first, self.last) {
+            vec![(first, last)]
+        } else {
+            Vec::new()
+        };
+        spans.sort_unstable_by_key(|&(start, end)| (start, end));
+        spans
+    }
+
+    /// Whether `t` falls inside some input file's span. Always `false`
+    /// when the logs are empty — never `true` on an empty coverage.
+    /// A time between the outer bounds is uncovered when it sits in a
+    /// gap between files.
     pub fn covers(&self, t: Timestamp) -> bool {
+        if !self.ranges.is_empty() {
+            return self
+                .ranges
+                .iter()
+                .any(|&(start, end)| t >= start && t <= end);
+        }
         match (self.first, self.last) {
-            (Some(f), Some(l)) => t >= f && t <= l,
+            (Some(start), Some(end)) => t >= start && t <= end,
             _ => false,
         }
     }
@@ -314,10 +389,7 @@ mod tests {
     }
 
     fn coverage(first: &str, last: &str) -> LogCoverage {
-        LogCoverage {
-            first: Some(ts(first)),
-            last: Some(ts(last)),
-        }
+        LogCoverage::from_timestamps([ts(first), ts(last)])
     }
 
     #[test]

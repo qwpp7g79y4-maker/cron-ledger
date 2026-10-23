@@ -121,7 +121,7 @@ cron-ledger --system-root /nonexistent \
 ## Wat het NIET doet
 
 - Geen live monitoring of alerting; het is een achteraf-analyse van een venster.
-- Het ziet geen runs als er geen logs zijn. Lege logs, en verwachte tijden buiten het bereik van de eerste tot de laatste logregel, zijn NO_TRACE. Een gat tussen die twee regels ligt nog binnen het bereik, dus een run zonder passende regel is daar MISSED.
+- Het ziet geen runs als er geen logs zijn. Dekking is één gesloten bereik per invoerbestand, van de eerste herkende regel van dat bestand tot de laatste, niet één bereik over alle bestanden. Een verwachte tijd binnen het bereik van een bestand zonder passende regel is MISSED. Eén syslog met een regel op 18 oktober 03:00 en een regel op 22 oktober 03:00 meldt 19, 20 en 21 oktober nog steeds als MISSED: die dagen liggen in dat bestand. Dezelfde twee regels in twee bestanden die niet op elkaar aansluiten, zoals `s.2.gz` dat op de 18e eindigt en `s.1` dat op de 22e begint, melden die drie dagen als NO_TRACE. Een gat tussen bestanden is geen bewijs dat de job niet draaide; geef elke rotatie apart mee als `--syslog` (een bestand dat je zelf aan elkaar hebt geplakt is één bereik). Verwachte tijden vóór de vroegste regel, ná de laatste regel, en een lege log zijn NO_TRACE. In `--json` zijn `log_coverage.first` en `log_coverage.last` de buitenste grenzen over de bestanden. Een tijd daartussen is alleen MISSED als die ook in het bereik van één enkel bestand valt. Het tekstrapport noemt het bereik van elk bestand.
 - Weet niet of een job **gelukt** is, tenzij cronie CMDEND of de journal de exitcode logt.
 - Geen anacron, fcron, Kubernetes CronJobs of macOS launchd (v1). Geen OnBootSec/OnUnitActiveSec.
 - Leest geen crontabs via `crontab -l` zelf; geef de uitvoer via stdin.
@@ -139,6 +139,10 @@ Specifiek voor deze versie: `--timers-list` (de tekstuitvoer van `systemctl list
 ## Claim → test/fixture
 
 Elke claim in deze README wordt gedekt door een bestaande test of fixture in deze repo. De volledige tabel, met per claim de test, staat in de [Engelse README](README.md#claim--testfixture).
+
+| Claim | Test / fixture |
+|---|---|
+| `MISSED` alleen binnen het bereik van één invoerbestand, van de eerste herkende regel van dat bestand tot de laatste. Een gat binnen dat bereik zonder passende regel is `MISSED`, ook 19–21 oktober tussen een regel op de 18e en een regel op de 22e in hetzelfde bestand. Een gat tussen twee bestanden, ook niet-aansluitende `s.1` en `s.2.gz`, een gat vóór het eerste bestand of ná het laatste, een lege log, en een gat dat precies op de venstergrens tussen twee bestanden valt, zijn `NO_TRACE`. Een tijd gelijk aan de eerste of laatste regel van een bestand valt binnen dat bereik. `--json` `log_coverage` is de buitenste grens; het tekstrapport noemt elk bestandsbereik | `tests/ledger_golden.rs` (`log_gap_missed_only_in_covered_days`, `interior_gap_between_first_and_last_log_line_is_missed`, `gap_between_two_log_files_is_no_trace`, `gap_on_the_window_edge_between_two_files_is_no_trace`), `src/app.rs::non_adjacent_rotation_files_are_separate_coverage_spans`, `tests/cli_report.rs::no_trace_only_scenario_exits_three` (`tests/fixtures/report/no_trace/`) |
 
 ## Ontwikkeling
 

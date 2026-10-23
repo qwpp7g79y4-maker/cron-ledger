@@ -6,6 +6,7 @@ mod job_key;
 mod matcher;
 mod status;
 
+pub(crate) use build::build_ledger_from_coverage;
 pub use build::{
     build_ledger, build_ledger_with_coverage, JobLedgerEntry, JobOutcome, JobSchedule, Ledger,
     ScheduledJob,

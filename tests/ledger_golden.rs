@@ -72,8 +72,9 @@ fn duplicate_command_two_users_matches_independently() {
     };
     assert_eq!(bob_outcomes[0].status, Status::Ok);
     // Bob's second day is genuinely missing, not Alice's event stolen or
-    // ignored: the logs do cover that day (Alice's event on day 2 extends
-    // global coverage there), so it is MISSED, not NO_TRACE.
+    // ignored: the logs do cover that day (Alice's event on day 2 is in
+    // the same file and extends that file's span), so it is MISSED, not
+    // NO_TRACE.
     assert_eq!(bob_outcomes[1].status, Status::Missed);
 }
 
@@ -221,11 +222,13 @@ fn log_gap_missed_only_in_covered_days() {
 
 #[test]
 fn interior_gap_between_first_and_last_log_line_is_missed() {
-    // A line on the 18th and a line on the 22nd. The days between sit
-    // inside [first, last], so a run with no event there is MISSED.
-    // The day before the first line and the day after the last line are
-    // outside the span and stay NO_TRACE. The span is not a list of
-    // holes: two lines make one closed range.
+    // Both lines are in one file. The days between sit inside that
+    // file's span, so a run with no event there is MISSED. The day
+    // before the first line and the day after the last line are outside
+    // the span and stay NO_TRACE. One file is one closed range: a quiet
+    // stretch between two lines of the same file is not a hole between
+    // logs. A hole between two files is a different case; see
+    // `gap_between_two_log_files_is_no_trace`.
     let expected: Vec<Timestamp> = (17..=23)
         .map(|day| ts(&format!("2026-10-{day:02}T03:00:00Z")))
         .collect();
@@ -263,6 +266,95 @@ fn interior_gap_between_first_and_last_log_line_is_missed() {
             Status::NoTrace, // 23rd: after the last line
         ]
     );
+}
+
+#[test]
+fn gap_between_two_log_files_is_no_trace() {
+    // The same instants as `interior_gap_between_first_and_last_log_line_is_missed`,
+    // but each line lives in its own file. The days between the files
+    // are not inside either span. A missing rotation is not proof the
+    // job did not run, so those days are NO_TRACE. Days inside one
+    // file's own span, with no matching command, stay MISSED.
+    let expected: Vec<Timestamp> = (17..=23)
+        .map(|day| ts(&format!("2026-10-{day:02}T03:00:00Z")))
+        .collect();
+    let job = cron_job("root", "/bin/backup.sh", expected);
+    let events = vec![
+        cmd_event("s.2.gz", 1, "2026-10-18T00:00:01Z", "root", "/bin/other.sh"),
+        cmd_event("s.2.gz", 2, "2026-10-19T23:00:00Z", "root", "/bin/other.sh"),
+        cmd_event("s.1", 1, "2026-10-22T03:00:01Z", "root", "/bin/backup.sh"),
+    ];
+    let ledger = build_ledger(&[job], &events);
+    let JobOutcome::Standard(outcomes) = &ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    let statuses: Vec<Status> = outcomes.iter().map(|o| o.status).collect();
+    assert_eq!(
+        statuses,
+        vec![
+            Status::NoTrace, // 17th: before the first file
+            Status::Missed,  // 18th: inside s.2.gz, backup never ran
+            Status::Missed,  // 19th: inside s.2.gz
+            Status::NoTrace, // 20th: hole between the two files
+            Status::NoTrace, // 21st
+            Status::Ok,      // 22nd: the line in s.1
+            Status::NoTrace, // 23rd: after the last file
+        ]
+    );
+    assert_eq!(ledger.log_coverage.spans().len(), 2);
+}
+
+#[test]
+fn gap_on_the_window_edge_between_two_files_is_no_trace() {
+    // Window [19T03:00:00, 20T03:00:00). The only expected run is the
+    // window start. One line sits before the window and one sits after
+    // it (20T03:00:01 is past an exclusive `until` of 20T03:00:00).
+    let expected = vec![ts("2026-10-19T03:00:00Z")];
+
+    let split = vec![
+        cmd_event("s.2.gz", 1, "2026-10-18T03:00:01Z", "root", "/bin/other.sh"),
+        cmd_event("s.1", 1, "2026-10-20T03:00:01Z", "root", "/bin/other.sh"),
+    ];
+    let split_ledger = build_ledger(
+        &[cron_job("root", "/bin/backup.sh", expected.clone())],
+        &split,
+    );
+    let JobOutcome::Standard(split_outcomes) = &split_ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    assert_eq!(
+        split_outcomes[0].status,
+        Status::NoTrace,
+        "19T03:00:00 is the window edge and falls in the hole between the files"
+    );
+
+    // The same two lines in one file still cover the window edge.
+    let one_file = vec![
+        cmd_event("syslog", 1, "2026-10-18T03:00:01Z", "root", "/bin/other.sh"),
+        cmd_event("syslog", 2, "2026-10-20T03:00:01Z", "root", "/bin/other.sh"),
+    ];
+    let one_ledger = build_ledger(
+        &[cron_job("root", "/bin/backup.sh", expected.clone())],
+        &one_file,
+    );
+    let JobOutcome::Standard(one_outcomes) = &one_ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    assert_eq!(one_outcomes[0].status, Status::Missed);
+
+    // A line exactly on the window start covers that instant.
+    let on_edge = vec![cmd_event(
+        "only.log",
+        1,
+        "2026-10-19T03:00:00Z",
+        "root",
+        "/bin/other.sh",
+    )];
+    let edge_ledger = build_ledger(&[cron_job("root", "/bin/backup.sh", expected)], &on_edge);
+    let JobOutcome::Standard(edge_outcomes) = &edge_ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    assert_eq!(edge_outcomes[0].status, Status::Missed);
 }
 
 fn journal_line(ts_us: i64, extra: &str) -> String {
@@ -596,6 +688,10 @@ fn persistent_timer_missed_run_is_caught_up_late_via_boot_event() {
 
 #[test]
 fn non_persistent_timer_missed_run_after_boot_stays_missed() {
+    // Both lines belong to one file, so 03:00 sits inside that span.
+    // A boot does not catch up a non-persistent timer: the run stays
+    // MISSED. Separate files would leave 03:00 in the hole between
+    // them, which is NO_TRACE and would not exercise this case.
     let job = ScheduledJob {
         key: JobKey::Timer {
             unit: "backup.service".to_string(),
@@ -615,7 +711,7 @@ fn non_persistent_timer_missed_run_after_boot_stays_missed() {
                 pid: None,
                 command: "unrelated.sh".to_string(),
             },
-            file: "syslog".to_string(),
+            file: "journal.jsonl".to_string(),
             line: 1,
         },
         LogEvent {
@@ -624,7 +720,7 @@ fn non_persistent_timer_missed_run_after_boot_stays_missed() {
                 boot_id: Some("boot-a".to_string()),
             },
             file: "journal.jsonl".to_string(),
-            line: 1,
+            line: 2,
         },
     ];
     let ledger = build_ledger(&[job], &events);

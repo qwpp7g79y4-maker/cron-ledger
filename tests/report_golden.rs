@@ -67,10 +67,7 @@ fn ok_ledger() -> (Ledger, HashMap<JobKey, String>) {
                 None,
             )]),
         }],
-        log_coverage: LogCoverage {
-            first: Some(ts("2026-10-20T03:00:02Z")),
-            last: Some(ts("2026-10-20T03:00:02Z")),
-        },
+        log_coverage: LogCoverage::from_timestamps([ts("2026-10-20T03:00:02Z")]),
         warnings: Vec::new(),
     };
     let mut descriptions = HashMap::new();
@@ -153,10 +150,10 @@ fn mixed_ledger() -> (Ledger, HashMap<JobKey, String>) {
                 outcome: JobOutcome::UnsupportedTrigger,
             },
         ],
-        log_coverage: LogCoverage {
-            first: Some(ts("2026-10-20T03:00:02Z")),
-            last: Some(ts("2026-10-29T03:00:00Z")),
-        },
+        log_coverage: LogCoverage::from_timestamps([
+            ts("2026-10-20T03:00:02Z"),
+            ts("2026-10-29T03:00:00Z"),
+        ]),
         warnings: Vec::new(),
     };
 

@@ -188,16 +188,15 @@ pub fn render_text(ledger: &Ledger, ctx: &ReportContext, color: bool) -> String 
     out.push_str(&parts.join(", "));
     out.push('\n');
 
-    match (ledger.log_coverage.first, ledger.log_coverage.last) {
-        (Some(first), Some(last)) => {
-            let _ = writeln!(
-                out,
-                "Logdekking: {} .. {}",
-                fmt_ts(first, ctx.tz),
-                fmt_ts(last, ctx.tz)
-            );
-        }
-        _ => out.push_str("Logdekking: geen logs\n"),
+    let spans = ledger.log_coverage.spans();
+    if spans.is_empty() {
+        out.push_str("Logdekking: geen logs\n");
+    } else {
+        let parts: Vec<String> = spans
+            .iter()
+            .map(|(first, last)| format!("{} .. {}", fmt_ts(*first, ctx.tz), fmt_ts(*last, ctx.tz)))
+            .collect();
+        let _ = writeln!(out, "Logdekking: {}", parts.join("; "));
     }
 
     let _ = writeln!(

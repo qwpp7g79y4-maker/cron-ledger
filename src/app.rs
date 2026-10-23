@@ -21,7 +21,8 @@ use jiff::Timestamp;
 use crate::cli::{Cli, InputPath};
 use crate::crontab::{self, describe_schedule, CronJob, ScheduleKind};
 use crate::ledger::{
-    build_ledger_with_coverage, normalize_command, JobKey, JobSchedule, Ledger, ScheduledJob,
+    build_ledger_from_coverage, normalize_command, JobKey, JobSchedule, Ledger, LogCoverage,
+    ScheduledJob,
 };
 use crate::log::{self, LogEvent};
 use crate::schedule::{self, default_timezone, resolve_timezone};
@@ -92,10 +93,6 @@ struct Collector {
     descriptions: HashMap<JobKey, String>,
     warnings: Vec<String>,
     events: Vec<LogEvent>,
-    /// Timestamps that bound log coverage. Syslog contributes its
-    /// recognised lines. The journal contributes every entry that had a
-    /// real timestamp, recognised or not.
-    span_timestamps: Vec<Timestamp>,
 }
 
 impl Collector {
@@ -294,8 +291,13 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         descriptions: HashMap::new(),
         warnings: Vec::new(),
         events: Vec::new(),
-        span_timestamps: Vec::new(),
     };
+
+    // One closed span per input file. Syslog contributes its recognised
+    // lines. The journal contributes every entry that had a real
+    // timestamp, recognised or not. Spans are not joined: a hole between
+    // two files (two non-adjacent rotations, for example) is not coverage.
+    let mut coverage = LogCoverage::default();
 
     for path in &cli.crontabs {
         let content = read_text(path)?;
@@ -476,8 +478,9 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             c.warnings
                 .push(format!("{}:{}: {}", w.file, w.line, w.message));
         }
-        c.span_timestamps
-            .extend(parsed.events.iter().map(|e| e.timestamp));
+        coverage = coverage.merge(LogCoverage::from_timestamps(
+            parsed.events.iter().map(|e| e.timestamp),
+        ));
         c.events.extend(parsed.events);
     }
 
@@ -490,11 +493,11 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             c.warnings
                 .push(format!("{}:{}: {}", w.file, w.line, w.message));
         }
-        c.span_timestamps.extend(parsed.coverage_timestamps);
+        coverage = coverage.merge(LogCoverage::from_timestamps(parsed.coverage_timestamps));
         c.events.extend(parsed.events);
     }
 
-    let ledger = build_ledger_with_coverage(&c.jobs, &c.events, c.span_timestamps);
+    let ledger = build_ledger_from_coverage(&c.jobs, &c.events, coverage);
 
     Ok(Audit {
         ledger,
@@ -1329,6 +1332,89 @@ mod tests {
                 "/usr/local/bin/kept.sh".to_string(),
             ]
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn non_adjacent_rotation_files_are_separate_coverage_spans() {
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-rotation-gap-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "0 3 * * * root /bin/backup.sh\n").unwrap();
+
+        // s.2.gz holds only 18 October. s.1 holds only 22 October.
+        // Nothing covers the days between those two rotations.
+        let older = dir.join("s.2.gz");
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(b"Oct 18 03:00:01 host CRON[1]: (root) CMD (/bin/backup.sh)\n")
+            .unwrap();
+        std::fs::write(&older, encoder.finish().unwrap()).unwrap();
+        let newer = dir.join("s.1");
+        std::fs::write(
+            &newer,
+            "Oct 22 03:00:01 host CRON[1]: (root) CMD (/bin/backup.sh)\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-17T00:00:00Z".to_string(),
+            until: Some("2026-10-24T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: PathBuf::from("/nonexistent"),
+            crontabs: vec![InputPath::File(crontab_path)],
+            syslogs: vec![InputPath::File(older), InputPath::File(newer)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-25T00:00:00Z")).unwrap();
+        let crate::ledger::JobOutcome::Standard(outcomes) = &audit.ledger.entries[0].outcome else {
+            panic!("expected a standard outcome");
+        };
+        let statuses: Vec<_> = outcomes.iter().map(|o| o.status).collect();
+        assert_eq!(
+            statuses,
+            vec![
+                crate::ledger::Status::NoTrace, // 17th
+                crate::ledger::Status::Ok,      // 18th, the line in s.2.gz
+                crate::ledger::Status::NoTrace, // 19th, between the files
+                crate::ledger::Status::NoTrace, // 20th
+                crate::ledger::Status::NoTrace, // 21st
+                crate::ledger::Status::Ok,      // 22nd, the line in s.1
+                crate::ledger::Status::NoTrace, // 23rd
+            ]
+        );
+        assert_eq!(crate::report::exit_code(&audit.ledger), 3);
+        assert_eq!(audit.ledger.log_coverage.spans().len(), 2);
+        assert_eq!(
+            audit.ledger.log_coverage.first,
+            Some(ts("2026-10-18T03:00:01Z"))
+        );
+        assert_eq!(
+            audit.ledger.log_coverage.last,
+            Some(ts("2026-10-22T03:00:01Z"))
+        );
+
+        let tz = TimeZone::UTC;
+        let ctx = crate::report::ReportContext {
+            since: ts("2026-10-17T00:00:00Z"),
+            until: ts("2026-10-24T00:00:00Z"),
+            tz: &tz,
+            tolerance: audit.tolerance,
+            descriptions: &audit.descriptions,
+            extra_warnings: &audit.extra_warnings,
+        };
+        let text = crate::report::render_text(&audit.ledger, &ctx, false);
+        assert!(
+            text.contains("Logdekking: 2026-10-18T03:00:01+00:00[UTC] .. 2026-10-18T03:00:01+00:00[UTC]; 2026-10-22T03:00:01+00:00[UTC] .. 2026-10-22T03:00:01+00:00[UTC]"),
+            "two files must not be printed as one span: {text}"
+        );
+        assert!(text.contains("0 MISSED"), "{text}");
+        assert!(text.contains("5 NO_TRACE"), "{text}");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
