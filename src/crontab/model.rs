@@ -5,10 +5,12 @@ use std::collections::BTreeSet;
 
 /// One schedule field (minute, hour, day-of-month, month, or day-of-week).
 ///
-/// `Star` means "every legal value, unrestricted" — this is kept distinct
-/// from `Values` containing every legal value, because the vixie-cron
-/// day-of-month/day-of-week OR rule (see [`matches_day`]) only applies when
-/// a field is *restricted*.
+/// `Star` means "every legal value, unrestricted". `Values` containing
+/// every legal value (e.g. from `1-31`) is kept distinct from it purely
+/// for display (`describe_field`) and for the wildcard-hour DST check in
+/// [`crate::schedule::expand`]; the day-of-month/day-of-week OR/AND rule
+/// does *not* use this distinction (see [`Schedule::dom_star`]/
+/// [`Schedule::dow_star`] and [`matches_day`] instead).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Field {
     Star,
@@ -22,10 +24,6 @@ impl Field {
             Field::Values(set) => v <= u8::MAX as u32 && set.contains(&(v as u8)),
         }
     }
-
-    pub fn is_restricted(&self) -> bool {
-        !matches!(self, Field::Star)
-    }
 }
 
 /// The five vixie-cron schedule fields of a non-`@`-special line.
@@ -36,6 +34,13 @@ pub struct Schedule {
     pub dom: Field,
     pub month: Field,
     pub dow: Field,
+    /// Whether the raw day-of-month field's first character was `*`
+    /// (`crontab(5)`: "don't start with *"), e.g. true for both `*` and
+    /// `*/2`. Drives the OR/AND choice in [`matches_day`] independently of
+    /// whether `dom` parsed to [`Field::Star`] or [`Field::Values`].
+    pub dom_star: bool,
+    /// Same as `dom_star`, for the day-of-week field.
+    pub dow_star: bool,
 }
 
 /// `@reboot` has no computable schedule of expected run times; every other
@@ -116,15 +121,24 @@ pub fn describe_schedule(schedule: &Schedule) -> String {
 }
 
 /// vixie-cron's day-of-month/day-of-week rule: if *both* fields are
-/// restricted (not `*`), a day matches if it satisfies *either* one (OR),
-/// not both (AND). If only one field is restricted, that field alone
-/// decides. If neither is restricted, every day matches.
-pub fn matches_day(dom: &Field, dow: &Field, day_of_month: u32, day_of_week: u32) -> bool {
-    match (dom.is_restricted(), dow.is_restricted()) {
-        (false, false) => true,
-        (true, false) => dom.contains(day_of_month),
-        (false, true) => dow.contains(day_of_week),
-        (true, true) => dom.contains(day_of_month) || dow.contains(day_of_week),
+/// restricted (`dom_star` and `dow_star` both false), a day matches if it
+/// satisfies *either* field (OR), not both. If either field is
+/// unrestricted (its raw text started with `*`, e.g. `*` or `*/2`), the
+/// day must satisfy *both* fields (AND) — which for a literal `*` field
+/// (whose `contains` is always true) reduces to "that field alone
+/// decides".
+pub fn matches_day(
+    dom: &Field,
+    dow: &Field,
+    dom_star: bool,
+    dow_star: bool,
+    day_of_month: u32,
+    day_of_week: u32,
+) -> bool {
+    if dom_star || dow_star {
+        dom.contains(day_of_month) && dow.contains(day_of_week)
+    } else {
+        dom.contains(day_of_month) || dow.contains(day_of_week)
     }
 }
 
@@ -144,28 +158,30 @@ mod tests {
             dom: Field::Star,
             month: Field::Star,
             dow: values(&[1, 5]),
+            dom_star: true,
+            dow_star: false,
         };
         assert_eq!(describe_schedule(&schedule), "0,15,30,45 * * * 1,5");
     }
 
     #[test]
     fn both_unrestricted_matches_every_day() {
-        assert!(matches_day(&Field::Star, &Field::Star, 1, 0));
-        assert!(matches_day(&Field::Star, &Field::Star, 31, 6));
+        assert!(matches_day(&Field::Star, &Field::Star, true, true, 1, 0));
+        assert!(matches_day(&Field::Star, &Field::Star, true, true, 31, 6));
     }
 
     #[test]
     fn only_dom_restricted() {
         let dom = values(&[13]);
-        assert!(matches_day(&dom, &Field::Star, 13, 2));
-        assert!(!matches_day(&dom, &Field::Star, 14, 2));
+        assert!(matches_day(&dom, &Field::Star, false, true, 13, 2));
+        assert!(!matches_day(&dom, &Field::Star, false, true, 14, 2));
     }
 
     #[test]
     fn only_dow_restricted() {
         let dow = values(&[5]);
-        assert!(matches_day(&Field::Star, &dow, 1, 5));
-        assert!(!matches_day(&Field::Star, &dow, 1, 4));
+        assert!(matches_day(&Field::Star, &dow, true, false, 1, 5));
+        assert!(!matches_day(&Field::Star, &dow, true, false, 1, 4));
     }
 
     #[test]
@@ -173,9 +189,21 @@ mod tests {
         // "0 0 13 * 5" = the 13th OR a Friday.
         let dom = values(&[13]);
         let dow = values(&[5]);
-        assert!(matches_day(&dom, &dow, 13, 1)); // 13th, not Friday: still matches.
-        assert!(matches_day(&dom, &dow, 1, 5)); // Friday, not 13th: still matches.
-        assert!(matches_day(&dom, &dow, 13, 5)); // both: matches.
-        assert!(!matches_day(&dom, &dow, 14, 1)); // neither: no match.
+        assert!(matches_day(&dom, &dow, false, false, 13, 1)); // 13th, not Friday: still matches.
+        assert!(matches_day(&dom, &dow, false, false, 1, 5)); // Friday, not 13th: still matches.
+        assert!(matches_day(&dom, &dow, false, false, 13, 5)); // both: matches.
+        assert!(!matches_day(&dom, &dow, false, false, 14, 1)); // neither: no match.
+    }
+
+    #[test]
+    fn dom_star_with_step_forces_and_not_or() {
+        // "0 0 */2 * 1": both fields look "restricted" by their expanded
+        // values, but dom's raw text started with `*`, so AND applies:
+        // only odd days that are also Mondays.
+        let dom = values(&[1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31]);
+        let dow = values(&[1]);
+        assert!(matches_day(&dom, &dow, true, false, 5, 1)); // odd day 5, Monday: matches.
+        assert!(!matches_day(&dom, &dow, true, false, 5, 2)); // odd day 5, Tuesday: no match.
+        assert!(!matches_day(&dom, &dow, true, false, 6, 1)); // even day 6, Monday: no match.
     }
 }

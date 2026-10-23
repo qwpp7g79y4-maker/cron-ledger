@@ -202,6 +202,9 @@ fn try_rfc5424(
     let timestamp_str = fields.next()?;
     let _host = fields.next()?;
     let app = fields.next()?;
+    if !is_cron_tag(app) {
+        return None;
+    }
     let procid = fields.next()?;
     let _msgid = fields.next()?;
     let sd_and_msg = fields.next()?;
@@ -488,6 +491,24 @@ Jan  1 00:01:00 host CRON[2]: (alice) CMD (x)
                 command: "backup.sh".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn non_cron_rfc5424_line_with_structured_data_is_skipped_silently() {
+        let content = "<13>1 2026-10-20T03:00:01+02:00 host rsyslogd 1234 - [origin swVersion=\"8.0\"] some message\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.events, vec![]);
+        assert_eq!(result.warnings, vec![]);
+    }
+
+    #[test]
+    fn non_cron_rfc5424_line_with_a_bad_timestamp_is_skipped_silently() {
+        let content = "<13>1 not-a-timestamp host rsyslogd 1234 - - some message\n";
+        let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+        let result = parse_syslog_cron(content, "syslog", since, &utc());
+        assert_eq!(result.events, vec![]);
+        assert_eq!(result.warnings, vec![]);
     }
 
     #[test]

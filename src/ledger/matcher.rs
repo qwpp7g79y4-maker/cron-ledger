@@ -195,7 +195,14 @@ pub fn apply_persistent_catchup(
         let candidates: Vec<(usize, Timestamp)> = outcomes
             .iter()
             .enumerate()
-            .filter(|(_, o)| matches!(o.status, Status::Missed | Status::Late) && o.expected < boot)
+            .filter(|(_, o)| {
+                o.expected < boot
+                    && match o.status {
+                        Status::Missed => true,
+                        Status::Late => o.actual.is_none_or(|a| a >= boot),
+                        _ => false,
+                    }
+            })
             .map(|(i, o)| (i, o.expected))
             .collect();
         if candidates.is_empty() {
@@ -347,6 +354,23 @@ mod tests {
         let mut got = match_runs(&expected, &[], Duration::from_secs(300), &cov);
         apply_persistent_catchup(&mut got, &[ts("2026-10-20T08:12:00Z")], false);
         assert_eq!(got[0].status, Status::Missed);
+    }
+
+    #[test]
+    fn persistent_catchup_does_not_claim_a_late_run_that_already_happened_before_boot() {
+        // The job ran, just 20 minutes late, well before the boot. That
+        // real (pre-boot) run must not be reinterpreted as the boot's
+        // catch-up.
+        let expected = vec![ts("2026-10-20T03:00:00Z")];
+        let runs = vec![(ts("2026-10-20T03:20:00Z"), ExitStatus::Unknown)];
+        let cov = coverage("2026-10-20T00:00:00Z", "2026-10-21T00:00:00Z");
+        let mut got = match_runs(&expected, &runs, Duration::from_secs(300), &cov);
+        assert_eq!(got[0].status, Status::Late);
+
+        apply_persistent_catchup(&mut got, &[ts("2026-10-20T08:12:00Z")], true);
+
+        assert_eq!(got[0].status, Status::Late);
+        assert_eq!(got[0].actual, Some(ts("2026-10-20T03:20:00Z")));
     }
 
     #[test]

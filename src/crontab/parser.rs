@@ -83,7 +83,7 @@ fn split_n_fields(line: &str, n: usize) -> Option<(Vec<&str>, &str)> {
 /// `PATH`, ...) is accepted but otherwise ignored.
 fn parse_env_line(line: &str) -> Option<(&str, &str)> {
     let eq = line.find('=')?;
-    let name = &line[..eq];
+    let name = line[..eq].trim_end();
     if name.is_empty()
         || !name
             .chars()
@@ -93,7 +93,7 @@ fn parse_env_line(line: &str) -> Option<(&str, &str)> {
     {
         return None;
     }
-    let mut value = &line[eq + 1..];
+    let mut value = line[eq + 1..].trim_start();
     if value.len() >= 2 {
         let bytes = value.as_bytes();
         if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
@@ -117,6 +117,8 @@ fn build_schedule(fields: &[&str], base: usize) -> Result<Schedule, String> {
         dom: parse_field(&DOM, fields[base + 2]).map_err(|e| format!("day-of-month: {e}"))?,
         month: parse_field(&MONTH, fields[base + 3]).map_err(|e| format!("month: {e}"))?,
         dow: parse_field(&DOW, fields[base + 4]).map_err(|e| format!("day-of-week: {e}"))?,
+        dom_star: fields[base + 2].starts_with('*'),
+        dow_star: fields[base + 4].starts_with('*'),
     })
 }
 
@@ -128,6 +130,8 @@ fn special_as_schedule(spec: &SpecialSchedule) -> Schedule {
         dom: parse_field(&DOM, spec.dom).unwrap(),
         month: parse_field(&MONTH, spec.month).unwrap(),
         dow: parse_field(&DOW, spec.dow).unwrap(),
+        dom_star: spec.dom.starts_with('*'),
+        dow_star: spec.dow.starts_with('*'),
     }
 }
 
@@ -268,6 +272,8 @@ mod tests {
             dom: Field::Star,
             month: Field::Star,
             dow: Field::Star,
+            dom_star: true,
+            dow_star: true,
         }
     }
 
@@ -322,6 +328,15 @@ CRON_TZ=Europe/Amsterdam
         assert_eq!(result.jobs[1].tz.as_deref(), Some("UTC"));
         assert_eq!(result.jobs[1].cron_tz.as_deref(), Some("Europe/Amsterdam"));
         assert_eq!(result.jobs[1].effective_tz(), Some("Europe/Amsterdam"));
+    }
+
+    #[test]
+    fn whitespace_around_env_equals_sign_is_accepted() {
+        let content = "CRON_TZ = Europe/Amsterdam\n* * * * * echo hi\n";
+        let result = parse_user_crontab(content, "f", None);
+        assert_eq!(result.warnings, vec![]);
+        assert_eq!(result.jobs.len(), 1);
+        assert_eq!(result.jobs[0].cron_tz.as_deref(), Some("Europe/Amsterdam"));
     }
 
     #[test]
@@ -386,14 +401,27 @@ nonsense line with no valid fields
 
     #[test]
     fn vixie_dom_dow_or_rule_field_shapes_preserved() {
-        // "0 0 13 * 5" (the 13th OR a Friday) must parse with both fields
-        // restricted, not with one collapsing to Star.
+        // "0 0 13 * 5" (the 13th OR a Friday) must parse with neither
+        // day field marked `*`-unrestricted.
         let result = parse_user_crontab("0 0 13 * 5 echo hi\n", "f", None);
         let ScheduleKind::Standard(schedule) = &result.jobs[0].schedule else {
             panic!("expected standard schedule");
         };
-        assert!(schedule.dom.is_restricted());
-        assert!(schedule.dow.is_restricted());
+        assert!(!schedule.dom_star);
+        assert!(!schedule.dow_star);
         assert_eq!(schedule.month, Field::Star);
+    }
+
+    #[test]
+    fn dom_step_field_is_still_star_for_the_or_and_rule() {
+        // "0 0 */2 * 1": the day-of-month field's raw text starts with
+        // `*`, so it stays unrestricted for the OR/AND rule even though
+        // it only matches odd days.
+        let result = parse_user_crontab("0 0 */2 * 1 echo hi\n", "f", None);
+        let ScheduleKind::Standard(schedule) = &result.jobs[0].schedule else {
+            panic!("expected standard schedule");
+        };
+        assert!(schedule.dom_star);
+        assert!(!schedule.dow_star);
     }
 }

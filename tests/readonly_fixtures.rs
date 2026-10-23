@@ -156,8 +156,12 @@ fn a_usage_error_before_any_fixture_read_is_not_mistaken_for_a_completed_audit()
     let before = snapshot(&copy);
     let output = assert_cmd::Command::cargo_bin("cron-ledger")
         .unwrap()
+        .arg("--system-root")
+        .arg(&copy)
         .arg("--crontab")
         .arg(copy.join("crontab/does-not-exist.crontab"))
+        .arg("--since")
+        .arg("2020-01-01T00:00:00Z")
         .output()
         .unwrap();
     let after = snapshot(&copy);
@@ -170,6 +174,10 @@ fn a_usage_error_before_any_fixture_read_is_not_mistaken_for_a_completed_audit()
         output.status.code(),
         Some(2),
         "a missing explicit --crontab is documented as a hard usage error"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("does-not-exist.crontab"),
+        "the exit code must come from the missing --crontab file, not from some other usage error"
     );
 
     restore_write_recursive(&copy);

@@ -118,6 +118,29 @@ fn percent_command_job_matches_on_the_split_command() {
 }
 
 #[test]
+fn escaped_percent_in_log_command_matches_the_unescaped_crontab_command() {
+    // The crontab parser stores `date +%F` (its own %-splitting already
+    // unescapes `\%`), but a cron log line echoes the command as written
+    // in the crontab, backslash and all: `date +\%F`. The job key must
+    // canonicalize that mismatch away.
+    let expected = vec![ts("2026-10-20T06:00:00Z")];
+    let job = cron_job("alice", "date +%F", expected);
+    let events = vec![cmd_event(
+        "syslog",
+        1,
+        "2026-10-20T06:00:00Z",
+        "alice",
+        r"date +\%F",
+    )];
+
+    let ledger = build_ledger(&[job], &events);
+    let JobOutcome::Standard(outcomes) = &ledger.entries[0].outcome else {
+        panic!("expected a standard outcome");
+    };
+    assert_eq!(outcomes[0].status, Status::Ok);
+}
+
+#[test]
 fn log_gap_missed_only_in_covered_days() {
     // Logs cover only the last 2 of 7 days -> MISSED only
     // in the covered days, NO_TRACE (not MISSED) in the uncovered ones.
