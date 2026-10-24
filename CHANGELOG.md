@@ -11,6 +11,9 @@ version stays 0.1.0.
 
 ### Fixed
 
+- `--help` and both README synopses listed `--until` as RFC3339 only.
+  `--until` takes an RFC3339 timestamp or a duration counted back from
+  now, the same as `--since`. (`f900524`)
 - The Dutch README no longer says the text report mixes Dutch and
   English labels. The report is English, and the Dutch exit-code table
   names an inverted `--until` as exit 2. (`643ad6e`)
