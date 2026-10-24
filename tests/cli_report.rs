@@ -188,7 +188,7 @@ fn until_equal_to_since_still_audits() {
         .assert()
         .code(0);
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    assert!(stdout.contains("verwacht: 0"), "{stdout}");
+    assert!(stdout.contains("expected: 0"), "{stdout}");
     std::fs::remove_dir_all(&root).ok();
 }
 
@@ -285,5 +285,250 @@ fn full_stdout_exits_with_a_write_error_instead_of_panicking() {
         err.contains("cannot write report"),
         "stderr should name the write failure: {err}"
     );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// Structural labels the text report used to print in Dutch. Status words
+/// (`OK`, `MISSED`, …) were already English and are not in this list.
+fn assert_no_dutch_report_labels(stdout: &str) {
+    for label in [
+        "verwacht:",
+        "gevonden:",
+        "laatste run:",
+        "gemiste tijden",
+        "Samenvatting:",
+        "Logdekking:",
+        "geen logs",
+        "Venster:",
+        "Tolerantie:",
+        "Waarschuwingen:",
+        "(geen jobs gevonden)",
+        "boots gevonden:",
+        "… en ",
+    ] {
+        assert!(
+            !stdout.contains(label),
+            "Dutch report label {label:?} still in:\n{stdout}"
+        );
+    }
+}
+
+/// The system-crontab example from the README, which the status review
+/// ran and got back a Dutch text report for. `--tz` is pinned to the zone
+/// that review printed (`Europe/Amsterdam`); without it the same files
+/// audit in the host zone and the timestamps move.
+#[test]
+fn reviewed_system_crontab_text_report_is_english() {
+    let root = empty_root();
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .arg("--system-root")
+        .arg("/nonexistent")
+        .arg("--crontab")
+        .arg("tests/fixtures/crontab/system.crontab")
+        .arg("--syslog")
+        .arg("tests/fixtures/logs/debian-syslog.log")
+        .arg("--since")
+        .arg("2026-10-20T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-21T00:00:00Z")
+        .arg("--tz")
+        .arg("Europe/Amsterdam")
+        .assert()
+        .code(1);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    let expected = "\
+root: /usr/local/bin/backup.sh (tests/fixtures/crontab/system.crontab:6) [0 3 * * *]
+  expected: 1, found: 1, missed: 0, late: 0
+  last run: 2026-10-20T03:00:01+02:00[Europe/Amsterdam] (OK)
+  missed times: -
+
+alice: /usr/local/bin/alice-job.sh (tests/fixtures/crontab/system.crontab:8) [30 2 * * *]
+  expected: 1, found: 0, missed: 1, late: 0
+  last run: -
+  first missed times: 2026-10-20T08:30:00+02:00[Europe/Amsterdam]
+
+----
+Summary: 1 OK, 0 LATE, 0 LATE (caught up), 1 MISSED, 0 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER
+Log coverage: 2026-10-20T03:00:01+02:00[Europe/Amsterdam] .. 2026-10-22T03:00:00+02:00[Europe/Amsterdam]
+Window: 2026-10-20T02:00:00+02:00[Europe/Amsterdam] .. 2026-10-21T02:00:00+02:00[Europe/Amsterdam] (tz Europe/Amsterdam)
+Tolerance: 300s
+";
+    assert_eq!(stdout, expected);
+    assert_no_dutch_report_labels(&stdout);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn empty_crontab_and_empty_syslog_report_in_english() {
+    let root = empty_root();
+    let crontab = root.join("empty.crontab");
+    let syslog = root.join("empty.log");
+    std::fs::write(&crontab, "").unwrap();
+    std::fs::write(&syslog, "").unwrap();
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .arg("--system-root")
+        .arg(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .arg("--syslog")
+        .arg(&syslog)
+        .arg("--since")
+        .arg("2026-10-20T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-21T00:00:00Z")
+        .arg("--tz")
+        .arg("UTC")
+        .assert()
+        .code(0);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(stdout.starts_with("(no jobs found)\n"), "{stdout}");
+    assert!(!stdout.contains("expected:"), "{stdout}");
+    assert!(stdout.contains(
+        "Summary: 0 OK, 0 LATE, 0 LATE (caught up), 0 MISSED, 0 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER"
+    ));
+    assert!(stdout.contains("Log coverage: no logs\n"), "{stdout}");
+    assert!(stdout.contains("Window: "), "{stdout}");
+    assert!(stdout.contains("Tolerance: 300s\n"), "{stdout}");
+    assert!(
+        stdout.contains("Warnings:\n  - no log events found in the window:"),
+        "{stdout}"
+    );
+    assert_no_dutch_report_labels(&stdout);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn too_many_broken_lines_truncate_the_english_report() {
+    // One empty log warning plus 60 unparseable crontab lines is past the
+    // 50-line text cap. The overflow line has to stay English.
+    let root = empty_root();
+    let crontab = root.join("big.crontab");
+    let syslog = root.join("empty.log");
+    let mut body = String::new();
+    for i in 0..60 {
+        body.push_str(&format!("not a valid cron line {i}\n"));
+    }
+    std::fs::write(&crontab, body).unwrap();
+    std::fs::write(&syslog, "").unwrap();
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .arg("--system-root")
+        .arg(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .arg("--syslog")
+        .arg(&syslog)
+        .arg("--since")
+        .arg("2026-10-20T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-21T00:00:00Z")
+        .arg("--tz")
+        .arg("UTC")
+        .assert()
+        .code(0);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    let shown = format!("{}:49:", crontab.display());
+    let hidden = format!("{}:50:", crontab.display());
+    assert!(stdout.starts_with("(no jobs found)\n"), "{stdout}");
+    assert_eq!(stdout.matches("\n  - ").count(), 50, "{stdout}");
+    assert!(
+        stdout.contains("not enough schedule fields, or missing command"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&shown),
+        "last shown parse warning missing:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains(&hidden),
+        "warning past the cap was printed:\n{stdout}"
+    );
+    assert!(stdout.contains("… and 11 more\n"), "{stdout}");
+    assert!(stdout.contains("Warnings:\n"), "{stdout}");
+    assert!(stdout.contains("Summary: 0 OK,"), "{stdout}");
+    assert!(stdout.contains("Log coverage: no logs\n"), "{stdout}");
+    assert_no_dutch_report_labels(&stdout);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broken_crontab_and_syslog_still_report_in_english() {
+    let root = empty_root();
+    let crontab = root.join("broken.crontab");
+    let syslog = root.join("broken.log");
+    let mut crontab_body = String::from("0 3 * * * root /usr/local/bin/backup.sh");
+    crontab_body.push('\u{1b}');
+    crontab_body.push_str(
+        "\nthis is not a valid cron line at all\n\
+         60 0 * * * root /bin/bad-minute\n\
+         @notaspecial root /bin/nope\n",
+    );
+    std::fs::write(&crontab, crontab_body).unwrap();
+    let mut syslog_bytes =
+        b"Oct 20 03:00:01 web1 CRON[1]: (root) CMD (/usr/local/bin/backup.sh".to_vec();
+    syslog_bytes.push(0x1b);
+    syslog_bytes.extend_from_slice(
+        b")\nOct 20 03:05:00 web1 CRON[2]: no parens here at all\n\
+NotAMonth 99 99:99:99 web1 CRON[4]: (root) CMD (/usr/local/bin/backup.sh)\n\xff\n",
+    );
+    std::fs::write(&syslog, syslog_bytes).unwrap();
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .arg("--system-root")
+        .arg(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .arg("--syslog")
+        .arg(&syslog)
+        .arg("--since")
+        .arg("2026-10-20T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-21T00:00:00Z")
+        .arg("--tz")
+        .arg("UTC")
+        .assert()
+        .code(0);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(
+        stdout.contains("expected: 1, found: 1, missed: 0, late: 0"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("last run:"), "{stdout}");
+    assert!(stdout.contains("(OK)"), "{stdout}");
+    assert!(stdout.contains("\\u{1b}"), "{stdout}");
+    assert!(
+        !stdout.contains('\u{1b}'),
+        "raw ESC from the command leaked into the report:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("minute: 'this' is not a number"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("minute: '60' (60) is out of range 0-59"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("unknown special string '@notaspecial'"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("line has no '(user) ACTION (arg)' body"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("'NotAMonth' is not a month name"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("invalid UTF-8 at byte "), "{stdout}");
+    assert!(stdout.contains(
+        "Summary: 1 OK, 0 LATE, 0 LATE (caught up), 0 MISSED, 0 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER"
+    ));
+    assert!(stdout.contains("Warnings:\n"), "{stdout}");
+    assert!(!stdout.contains("… and "), "{stdout}");
+    assert_no_dutch_report_labels(&stdout);
     std::fs::remove_dir_all(&root).ok();
 }

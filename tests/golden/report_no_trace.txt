@@ -1,12 +1,12 @@
 root: /usr/local/bin/ghost.sh (crontab:1) [0 3 * * *]
-  verwacht: 1, gevonden: 0, missed: 0, late: 0
-  laatste run: -
-  gemiste tijden: -
+  expected: 1, found: 0, missed: 0, late: 0
+  last run: -
+  missed times: -
 
 ----
-Samenvatting: 0 OK, 0 LATE, 0 LATE (caught up), 0 MISSED, 1 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER
-Logdekking: geen logs
-Venster: 2026-10-20T00:00:00+00:00[UTC] .. 2026-11-01T00:00:00+00:00[UTC] (tz UTC)
-Tolerantie: 300s
-Waarschuwingen:
+Summary: 0 OK, 0 LATE, 0 LATE (caught up), 0 MISSED, 1 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER
+Log coverage: no logs
+Window: 2026-10-20T00:00:00+00:00[UTC] .. 2026-11-01T00:00:00+00:00[UTC] (tz UTC)
+Tolerance: 300s
+Warnings:
   - no log events found in the window: every expected run is reported as NO_TRACE, never MISSED
