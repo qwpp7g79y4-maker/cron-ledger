@@ -1578,7 +1578,7 @@ mod tests {
         };
         let text = crate::report::render_text(&audit.ledger, &ctx, false);
         assert!(
-            text.contains("Logdekking: 2026-10-18T03:00:01+00:00[UTC] .. 2026-10-18T03:00:01+00:00[UTC]; 2026-10-22T03:00:01+00:00[UTC] .. 2026-10-22T03:00:01+00:00[UTC]"),
+            text.contains("Log coverage: 2026-10-18T03:00:01+00:00[UTC] .. 2026-10-18T03:00:01+00:00[UTC]; 2026-10-22T03:00:01+00:00[UTC] .. 2026-10-22T03:00:01+00:00[UTC]"),
             "two files must not be printed as one span: {text}"
         );
         assert!(text.contains("0 MISSED"), "{text}");

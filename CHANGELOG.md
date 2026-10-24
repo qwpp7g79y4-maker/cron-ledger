@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file, in the
 style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- The default text report uses English labels (`expected`, `found`,
+  `last run`, `Summary`, `Log coverage`, `Window`, `Tolerance`,
+  `Warnings`, `… and N more`), the same language as `--help`, the
+  status words, and `--json`.
+
 ## [0.1.0] - 2026-10-22
 
 Initial release.

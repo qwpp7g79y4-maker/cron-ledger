@@ -83,31 +83,31 @@ fn render_job_block(out: &mut String, view: &JobView, ctx: &ReportContext, color
         JobOutcome::Standard(_) => {
             let _ = writeln!(
                 out,
-                "  verwacht: {}, gevonden: {}, missed: {}, late: {}",
+                "  expected: {}, found: {}, missed: {}, late: {}",
                 view.expected, view.found, view.missed, view.late
             );
             match view.last_run {
                 Some((ts, status)) => {
                     let _ = writeln!(
                         out,
-                        "  laatste run: {} ({})",
+                        "  last run: {} ({})",
                         fmt_ts(ts, ctx.tz),
                         colored_status(status, color)
                     );
                 }
                 None => {
-                    let _ = writeln!(out, "  laatste run: -");
+                    let _ = writeln!(out, "  last run: -");
                 }
             }
             if view.first_missed.is_empty() {
-                let _ = writeln!(out, "  gemiste tijden: -");
+                let _ = writeln!(out, "  missed times: -");
             } else {
                 let times: Vec<String> = view
                     .first_missed
                     .iter()
                     .map(|t| fmt_ts(*t, ctx.tz))
                     .collect();
-                let _ = writeln!(out, "  eerste gemiste tijden: {}", times.join(", "));
+                let _ = writeln!(out, "  first missed times: {}", times.join(", "));
             }
         }
         JobOutcome::Reboot { boots } => {
@@ -117,15 +117,10 @@ fn render_job_block(out: &mut String, view: &JobView, ctx: &ReportContext, color
                 colored_status(Status::RebootOnly, color)
             );
             if boots.is_empty() {
-                let _ = writeln!(out, "  boots gevonden: 0");
+                let _ = writeln!(out, "  boots found: 0");
             } else {
                 let times: Vec<String> = boots.iter().map(|t| fmt_ts(*t, ctx.tz)).collect();
-                let _ = writeln!(
-                    out,
-                    "  boots gevonden: {} ({})",
-                    boots.len(),
-                    times.join(", ")
-                );
+                let _ = writeln!(out, "  boots found: {} ({})", boots.len(), times.join(", "));
             }
         }
         JobOutcome::UnsupportedTrigger => {
@@ -170,7 +165,7 @@ pub fn render_text(ledger: &Ledger, ctx: &ReportContext, color: bool) -> String 
     let views = job_views(ledger, ctx.descriptions);
 
     if views.is_empty() {
-        out.push_str("(geen jobs gevonden)\n\n");
+        out.push_str("(no jobs found)\n\n");
     } else {
         for view in &views {
             render_job_block(&mut out, view, ctx, color);
@@ -179,7 +174,7 @@ pub fn render_text(ledger: &Ledger, ctx: &ReportContext, color: bool) -> String 
     }
 
     out.push_str("----\n");
-    out.push_str("Samenvatting: ");
+    out.push_str("Summary: ");
     let counts = status_counts(ledger);
     let parts: Vec<String> = counts
         .iter()
@@ -190,35 +185,35 @@ pub fn render_text(ledger: &Ledger, ctx: &ReportContext, color: bool) -> String 
 
     let spans = ledger.log_coverage.spans();
     if spans.is_empty() {
-        out.push_str("Logdekking: geen logs\n");
+        out.push_str("Log coverage: no logs\n");
     } else {
         let parts: Vec<String> = spans
             .iter()
             .map(|(first, last)| format!("{} .. {}", fmt_ts(*first, ctx.tz), fmt_ts(*last, ctx.tz)))
             .collect();
-        let _ = writeln!(out, "Logdekking: {}", parts.join("; "));
+        let _ = writeln!(out, "Log coverage: {}", parts.join("; "));
     }
 
     let _ = writeln!(
         out,
-        "Venster: {} .. {} (tz {})",
+        "Window: {} .. {} (tz {})",
         fmt_ts(ctx.since, ctx.tz),
         fmt_ts(ctx.until, ctx.tz),
         ctx.tz.iana_name().unwrap_or("?"),
     );
-    let _ = writeln!(out, "Tolerantie: {}s", ctx.tolerance.as_secs());
+    let _ = writeln!(out, "Tolerance: {}s", ctx.tolerance.as_secs());
 
     let mut all_warnings: Vec<&str> = ledger.warnings.iter().map(|w| w.as_str()).collect();
     all_warnings.extend(ctx.extra_warnings.iter().map(|w| w.as_str()));
     if !all_warnings.is_empty() {
-        out.push_str("Waarschuwingen:\n");
+        out.push_str("Warnings:\n");
         let shown = all_warnings.len().min(MAX_WARNINGS_SHOWN);
         for w in &all_warnings[..shown] {
             let _ = writeln!(out, "  - {}", neutralize_controls(w));
         }
         let hidden = all_warnings.len() - shown;
         if hidden > 0 {
-            let _ = writeln!(out, "  … en {hidden} meer");
+            let _ = writeln!(out, "  … and {hidden} more");
         }
     }
 
@@ -313,7 +308,12 @@ mod tests {
 
         let text = render_text(&ledger, &ctx, false);
         assert_eq!(text.matches("\n  - warn ").count(), MAX_WARNINGS_SHOWN);
-        assert!(text.contains(&format!("en {} meer", 1000 - MAX_WARNINGS_SHOWN)));
+        assert!(text.contains(&format!("… and {} more", 1000 - MAX_WARNINGS_SHOWN)));
+        assert!(text.contains("(no jobs found)"));
+        assert!(text.contains("Summary: "));
+        assert!(text.contains("Warnings:\n"));
+        assert!(!text.contains("Waarschuwingen"));
+        assert!(!text.contains("… en "));
 
         let json = render_json(&ledger, &ctx);
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -332,6 +332,7 @@ mod tests {
 
         let text = render_text(&ledger, &ctx, false);
         assert_eq!(text.matches("\n  - warn ").count(), MAX_WARNINGS_SHOWN);
-        assert!(!text.contains("meer"));
+        assert!(!text.contains("… and "));
+        assert!(!text.contains("… en "));
     }
 }
