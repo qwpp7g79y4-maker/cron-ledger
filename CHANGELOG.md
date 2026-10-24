@@ -6,10 +6,14 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.1.0] - 2026-10-24
 
 First release. There is no earlier tag, so this lists every commit since
-the first one. The package version stays 0.1.0.
+the first one, except commits that only update this file. The package
+version stays 0.1.0.
 
 ### Fixed
 
+- The Dutch README no longer says the text report mixes Dutch and
+  English labels. The report is English, and the Dutch exit-code table
+  names an inverted `--until` as exit 2. (`643ad6e`)
 - The default text report uses English labels (`expected`, `found`,
   `last run`, `Summary`, `Log coverage`, `Window`, `Tolerance`,
   `Warnings`, `… and N more`), the same language as `--help`, the
