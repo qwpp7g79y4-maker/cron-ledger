@@ -2,6 +2,8 @@
 //! reduces to: one [`LogEvent`] per recognized line, plus a count of lines
 //! that looked like evidence but could not be parsed.
 
+use std::rc::Rc;
+
 use jiff::Timestamp;
 use serde::Serialize;
 
@@ -65,7 +67,11 @@ pub enum ExitStatus {
 pub struct LogEvent {
     pub timestamp: Timestamp,
     pub source: EventSource,
-    pub file: String,
+    /// Shared between every event parsed from the same file: a syslog or
+    /// journal file can produce millions of events, and they all carry
+    /// the identical path, so cloning an `Rc` keeps that label at O(1)
+    /// instead of reallocating it once per line.
+    pub file: Rc<str>,
     pub line: usize,
 }
 

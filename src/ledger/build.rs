@@ -133,7 +133,7 @@ pub fn build_ledger(jobs: &[ScheduledJob], events: &[LogEvent]) -> Ledger {
     let mut per_file: BTreeMap<&str, Vec<Timestamp>> = BTreeMap::new();
     for event in events {
         per_file
-            .entry(event.file.as_str())
+            .entry(event.file.as_ref())
             .or_default()
             .push(event.timestamp);
     }

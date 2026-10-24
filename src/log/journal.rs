@@ -20,6 +20,7 @@ use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, SeqAcces
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fmt;
+use std::rc::Rc;
 
 fn warn(warnings: &mut Vec<LogWarning>, file: &str, line: usize, message: impl Into<String>) {
     warnings.push(LogWarning {
@@ -255,6 +256,9 @@ fn read_journal_line(line: &str) -> Result<JournalLine, serde_json::Error> {
 /// Parse `journalctl -o json` NDJSON output into [`LogEvent`]s.
 pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
+    // Shared by every event this call produces; see the same note on
+    // `parse_syslog_cron` in `syslog.rs`.
+    let file_rc: Rc<str> = Rc::from(file);
     let mut events = Vec::new();
     let mut warnings = Vec::new();
     let mut coverage_timestamps = Vec::new();
@@ -321,7 +325,7 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
                     source: EventSource::Boot {
                         boot_id: Some(boot_id.to_string()),
                     },
-                    file: file.to_string(),
+                    file: Rc::clone(&file_rc),
                     line: line_no,
                 });
             }
@@ -387,7 +391,7 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
                 events.push(LogEvent {
                     timestamp,
                     source,
-                    file: file.to_string(),
+                    file: Rc::clone(&file_rc),
                     line: line_no,
                 });
             }
@@ -414,7 +418,7 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
                         source: EventSource::SystemdUnitStart {
                             unit: unit.to_string(),
                         },
-                        file: file.to_string(),
+                        file: Rc::clone(&file_rc),
                         line: line_no,
                     });
                 }

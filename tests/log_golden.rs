@@ -131,3 +131,32 @@ fn one_million_lines_parses_fast_in_release() {
         );
     }
 }
+
+/// Regression for the ~5.5x memory blowup found in
+/// `breaktest-cronledger-0001.md`: every event from one parse call used to
+/// hold its own `file.to_string()` clone of the (always identical) file
+/// label. If that ever comes back, every event's `file` would point at a
+/// distinct allocation instead of sharing the parse call's single `Rc`.
+#[test]
+fn every_event_shares_one_allocation_for_the_file_label() {
+    let mut content = String::with_capacity(10_000 * 70);
+    for pid in 1..=10_000u32 {
+        content.push_str(&format!(
+            "Oct 20 03:00:{:02} web1 CRON[{pid}]: (root) CMD (/usr/local/bin/job.sh)\n",
+            pid % 60
+        ));
+    }
+    let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+    let result = parse_syslog_cron(&content, "shared-label.log", since, &TimeZone::UTC);
+
+    assert_eq!(result.events.len(), 10_000);
+    let first = &result.events[0].file;
+    assert!(
+        result
+            .events
+            .iter()
+            .all(|e| std::rc::Rc::ptr_eq(&e.file, first)),
+        "events from the same parse call must share one Rc allocation for `file`"
+    );
+    assert_eq!(std::rc::Rc::strong_count(first), 10_000);
+}

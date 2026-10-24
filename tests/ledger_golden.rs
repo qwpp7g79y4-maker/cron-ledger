@@ -23,7 +23,7 @@ fn cmd_event(file: &str, line: usize, when: &str, user: &str, command: &str) -> 
             pid: None,
             command: command.to_string(),
         },
-        file: file.to_string(),
+        file: file.into(),
         line,
     }
 }
@@ -34,7 +34,7 @@ fn cron_job(key_user: &str, key_command: &str, expected: Vec<Timestamp>) -> Sche
             user: key_user.to_string(),
             command: key_command.to_string(),
         },
-        file: "crontab".to_string(),
+        file: "crontab".into(),
         line: 1,
         schedule: JobSchedule::Standard(expected),
         tolerance: Duration::from_secs(300),
@@ -444,7 +444,7 @@ fn journal_excerpt_without_boot_evidence_does_not_catch_up_a_persistent_timer() 
             user: "root".to_string(),
             command: "echo reboot".to_string(),
         },
-        file: "crontab".to_string(),
+        file: "crontab".into(),
         line: 1,
         schedule: JobSchedule::Reboot,
         tolerance: Duration::from_secs(300),
@@ -455,7 +455,7 @@ fn journal_excerpt_without_boot_evidence_does_not_catch_up_a_persistent_timer() 
         key: JobKey::Timer {
             unit: "backup.service".to_string(),
         },
-        file: "backup.timer".to_string(),
+        file: "backup.timer".into(),
         line: 1,
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
@@ -512,7 +512,7 @@ fn kernel_banner_still_catches_up_a_persistent_timer() {
             user: "root".to_string(),
             command: "echo reboot".to_string(),
         },
-        file: "crontab".to_string(),
+        file: "crontab".into(),
         line: 1,
         schedule: JobSchedule::Reboot,
         tolerance: Duration::from_secs(300),
@@ -523,7 +523,7 @@ fn kernel_banner_still_catches_up_a_persistent_timer() {
         key: JobKey::Timer {
             unit: "backup.service".to_string(),
         },
-        file: "backup.timer".to_string(),
+        file: "backup.timer".into(),
         line: 1,
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
@@ -552,7 +552,7 @@ fn reboot_job_reports_found_boots_for_info_only() {
             user: "root".to_string(),
             command: "echo reboot".to_string(),
         },
-        file: "crontab".to_string(),
+        file: "crontab".into(),
         line: 8,
         schedule: JobSchedule::Reboot,
         tolerance: Duration::from_secs(300),
@@ -565,7 +565,7 @@ fn reboot_job_reports_found_boots_for_info_only() {
             source: EventSource::Boot {
                 boot_id: Some("boot-a".to_string()),
             },
-            file: "journal.jsonl".to_string(),
+            file: "journal.jsonl".into(),
             line: 1,
         },
         LogEvent {
@@ -573,7 +573,7 @@ fn reboot_job_reports_found_boots_for_info_only() {
             source: EventSource::Boot {
                 boot_id: Some("boot-b".to_string()),
             },
-            file: "journal.jsonl".to_string(),
+            file: "journal.jsonl".into(),
             line: 2,
         },
     ];
@@ -593,7 +593,7 @@ fn unsupported_trigger_timer_is_flagged_without_computation() {
         key: JobKey::Timer {
             unit: "flaky.service".to_string(),
         },
-        file: "flaky.timer".to_string(),
+        file: "flaky.timer".into(),
         line: 1,
         schedule: JobSchedule::UnsupportedTrigger,
         tolerance: Duration::from_secs(60),
@@ -610,7 +610,7 @@ fn timer_matches_via_systemd_unit_start_events() {
         key: JobKey::Timer {
             unit: "backup.service".to_string(),
         },
-        file: "backup.timer".to_string(),
+        file: "backup.timer".into(),
         line: 1,
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
@@ -622,7 +622,7 @@ fn timer_matches_via_systemd_unit_start_events() {
         source: EventSource::SystemdUnitStart {
             unit: "backup.service".to_string(),
         },
-        file: "journal.jsonl".to_string(),
+        file: "journal.jsonl".into(),
         line: 1,
     }];
     let ledger = build_ledger(&[job], &events);
@@ -678,7 +678,7 @@ fn oneshot_finished_line_is_a_run_not_missed() {
         key: JobKey::Timer {
             unit: "backup.service".to_string(),
         },
-        file: "backup.timer".to_string(),
+        file: "backup.timer".into(),
         line: 1,
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
@@ -754,7 +754,7 @@ fn started_and_finished_for_one_run_is_not_counted_twice() {
         key: JobKey::Timer {
             unit: "backup.service".to_string(),
         },
-        file: "backup.timer".to_string(),
+        file: "backup.timer".into(),
         line: 1,
         schedule: JobSchedule::Standard(vec![
             ts("2026-10-20T03:00:00Z"),
@@ -783,7 +783,7 @@ fn persistent_timer_missed_run_is_caught_up_late_via_boot_event() {
         key: JobKey::Timer {
             unit: "backup.service".to_string(),
         },
-        file: "backup.timer".to_string(),
+        file: "backup.timer".into(),
         line: 1,
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
@@ -800,7 +800,7 @@ fn persistent_timer_missed_run_is_caught_up_late_via_boot_event() {
                 pid: None,
                 command: "unrelated.sh".to_string(),
             },
-            file: "syslog".to_string(),
+            file: "syslog".into(),
             line: 1,
         },
         LogEvent {
@@ -808,7 +808,7 @@ fn persistent_timer_missed_run_is_caught_up_late_via_boot_event() {
             source: EventSource::Boot {
                 boot_id: Some("boot-a".to_string()),
             },
-            file: "journal.jsonl".to_string(),
+            file: "journal.jsonl".into(),
             line: 1,
         },
         LogEvent {
@@ -816,7 +816,7 @@ fn persistent_timer_missed_run_is_caught_up_late_via_boot_event() {
             source: EventSource::SystemdUnitStart {
                 unit: "backup.service".to_string(),
             },
-            file: "journal.jsonl".to_string(),
+            file: "journal.jsonl".into(),
             line: 2,
         },
     ];
@@ -838,7 +838,7 @@ fn non_persistent_timer_missed_run_after_boot_stays_missed() {
         key: JobKey::Timer {
             unit: "backup.service".to_string(),
         },
-        file: "backup.timer".to_string(),
+        file: "backup.timer".into(),
         line: 1,
         schedule: JobSchedule::Standard(vec![ts("2026-10-20T03:00:00Z")]),
         tolerance: Duration::from_secs(300),
@@ -853,7 +853,7 @@ fn non_persistent_timer_missed_run_after_boot_stays_missed() {
                 pid: None,
                 command: "unrelated.sh".to_string(),
             },
-            file: "journal.jsonl".to_string(),
+            file: "journal.jsonl".into(),
             line: 1,
         },
         LogEvent {
@@ -861,7 +861,7 @@ fn non_persistent_timer_missed_run_after_boot_stays_missed() {
             source: EventSource::Boot {
                 boot_id: Some("boot-a".to_string()),
             },
-            file: "journal.jsonl".to_string(),
+            file: "journal.jsonl".into(),
             line: 2,
         },
     ];
@@ -883,7 +883,7 @@ fn cmdend_without_pid_is_paired_fifo_and_carries_exit_status() {
                 pid: None,
                 command: "backup.sh".to_string(),
             },
-            file: "syslog".to_string(),
+            file: "syslog".into(),
             line: 1,
         },
         LogEvent {
@@ -893,7 +893,7 @@ fn cmdend_without_pid_is_paired_fifo_and_carries_exit_status() {
                 pid: None,
                 command: "backup.sh".to_string(),
             },
-            file: "syslog".to_string(),
+            file: "syslog".into(),
             line: 2,
         },
     ];

@@ -5,6 +5,8 @@
 //! timestamp), and rsyslog's high-precision file format (a leading
 //! RFC3339 timestamp, no priority) are all supported.
 
+use std::rc::Rc;
+
 use super::event::{EventSource, LogEvent, LogParseResult, LogWarning};
 use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
@@ -311,7 +313,7 @@ fn looks_like_leading_rfc3339(line: &str) -> bool {
 /// not parse is a warning, same as a bad RFC3164 timestamp.
 fn parse_leading_rfc3339(
     line: &str,
-    file: &str,
+    file: &Rc<str>,
     line_no: usize,
     events: &mut Vec<LogEvent>,
     warnings: &mut Vec<LogWarning>,
@@ -343,7 +345,7 @@ fn parse_leading_rfc3339(
         Outcome::Event(source) => events.push(LogEvent {
             timestamp,
             source,
-            file: file.to_string(),
+            file: Rc::clone(file),
             line: line_no,
         }),
         Outcome::Garbage(reason) => warn(warnings, file, line_no, reason),
@@ -368,6 +370,10 @@ pub fn parse_syslog_cron(
     tz: &TimeZone,
 ) -> LogParseResult {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
+    // Shared by every event this call produces: cloning the `Rc` instead
+    // of re-allocating the (identical) file label per line keeps a
+    // multi-million-line log from ballooning memory far past its own size.
+    let file_rc: Rc<str> = Rc::from(file);
     let mut events = Vec::new();
     let mut warnings = Vec::new();
     let mut years = YearInference::new(tz, since);
@@ -388,7 +394,7 @@ pub fn parse_syslog_cron(
                     events.push(LogEvent {
                         timestamp,
                         source,
-                        file: file.to_string(),
+                        file: Rc::clone(&file_rc),
                         line: line_no,
                     });
                 }
@@ -400,7 +406,7 @@ pub fn parse_syslog_cron(
                 events.push(LogEvent {
                     timestamp,
                     source,
-                    file: file.to_string(),
+                    file: Rc::clone(&file_rc),
                     line: line_no,
                 });
             }
@@ -412,7 +418,7 @@ pub fn parse_syslog_cron(
         // consume the timestamp, the host, the tag, and the user, and
         // then drop the line because the remainder has no ": ".
         if looks_like_leading_rfc3339(line) {
-            parse_leading_rfc3339(line, file, line_no, &mut events, &mut warnings);
+            parse_leading_rfc3339(line, &file_rc, line_no, &mut events, &mut warnings);
             continue;
         }
 
@@ -486,7 +492,7 @@ pub fn parse_syslog_cron(
                 events.push(LogEvent {
                     timestamp,
                     source,
-                    file: file.to_string(),
+                    file: Rc::clone(&file_rc),
                     line: line_no,
                 });
             }
