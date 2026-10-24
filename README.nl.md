@@ -28,11 +28,11 @@ Beide installeren de binary `cron-ledger` in `~/.cargo/bin` (of waar `cargo inst
 cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root DIR]
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
-            --since <RFC3339|30d> [--until <RFC3339>] [--tz Europe/Amsterdam]
+            --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
             [--tolerance 5m] [--json]
 ```
 
-`-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`. Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` zet die scan al uit, dus dat pad wordt niet gelezen. Het blijft in het voorbeeld staan zodat het weglaten van de bronvlag je eigen `/etc/crontab` en `/etc/cron.d/*` niet meeneemt.
+`-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Elke andere waarde is een gebruiksfout en eindigt met exitcode 2, met de melding `'{value}' is not an RFC3339 timestamp or a duration like '30d'`. Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`. Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` zet die scan al uit, dus dat pad wordt niet gelezen. Het blijft in het voorbeeld staan zodat het weglaten van de bronvlag je eigen `/etc/crontab` en `/etc/cron.d/*` niet meeneemt.
 De paden `tests/fixtures/` hieronder bestaan alleen in een kloon van
 deze repository (`git clone`, daarna `cargo install --path .`). Na
 `cargo install cron-ledger` geef je je eigen bestanden mee met
@@ -123,7 +123,7 @@ cron-ledger --system-root /nonexistent \
 |---|---|
 | `0` | Alles is `OK` (`REBOOT_ONLY`/`UNSUPPORTED_TRIGGER` tellen niet mee, die zijn alleen informatief). |
 | `1` | Minstens één `MISSED` of `LATE`. |
-| `2` | Gebruiks- of invoer/uitvoerfout (verkeerde opties, `--until` eerder dan `--since`, meer dan één stdin-bron, een expliciet opgegeven invoerbestand dat niet te lezen is, een `--since`/`--until`-venster waarvan de planning voorbij de limiet van verwachte runs uitdijt, of het rapport kan niet worden geschreven). |
+| `2` | Gebruiks- of invoer/uitvoerfout (verkeerde opties, een `--since`/`--until`-waarde die geen RFC3339-tijdstip en geen duur is, `--until` eerder dan `--since`, meer dan één stdin-bron, een expliciet opgegeven invoerbestand dat niet te lezen is, een `--since`/`--until`-venster waarvan de planning voorbij de limiet van verwachte runs uitdijt, of het rapport kan niet worden geschreven). |
 | `3` | Geen `MISSED`/`LATE`, maar wel minstens één `NO_TRACE`. |
 
 ## Wat het NIET doet

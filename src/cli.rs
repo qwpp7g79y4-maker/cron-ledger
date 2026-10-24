@@ -171,7 +171,7 @@ pub fn usage() -> &'static str {
     "cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root DIR]\n\
      \x20           [--timer-unit PATH]... [--timers-list PATH|-]...\n\
      \x20           [--syslog PATH|-]... [--journal-json PATH|-]...\n\
-     \x20           --since <RFC3339|30d> [--until <RFC3339>] [--tz Europe/Amsterdam]\n\
+     \x20           --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]\n\
      \x20           [--tolerance 5m] [--json]\n"
 }
 
@@ -277,5 +277,10 @@ mod tests {
     fn help_short_circuits_since_requirement() {
         let cli = parse(&args(&["--help"])).unwrap();
         assert!(cli.help);
+    }
+
+    #[test]
+    fn usage_shows_until_accepts_rfc3339_or_a_duration() {
+        assert!(usage().contains("--until <RFC3339|30d>"));
     }
 }

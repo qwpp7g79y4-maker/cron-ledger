@@ -604,7 +604,11 @@ mod tests {
     #[test]
     fn resolve_timestamp_rejects_garbage() {
         let now = ts("2026-10-22T00:00:00Z");
-        assert!(resolve_timestamp("banana", now).is_err());
+        let err = resolve_timestamp("banana", now).unwrap_err();
+        assert_eq!(
+            err,
+            "'banana' is not an RFC3339 timestamp or a duration like '30d'"
+        );
     }
 
     #[test]

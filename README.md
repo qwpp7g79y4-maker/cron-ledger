@@ -31,13 +31,15 @@ Both install the `cron-ledger` binary into `~/.cargo/bin` (or wherever
 cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root DIR]
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
-            --since <RFC3339|30d> [--until <RFC3339>] [--tz Europe/Amsterdam]
+            --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
             [--tolerance 5m] [--json]
 ```
 
 `-` means stdin; at most one source across all flags may be stdin.
 `--since`/`--until` take either an RFC3339 timestamp or a
 `systemd.time(7)`-style duration counted back from now (`30d`, `2h`...).
+Anything else is a usage error and exits 2, with
+`'{value}' is not an RFC3339 timestamp or a duration like '30d'`.
 Everything below uses the fixtures under `tests/fixtures/` so every
 example is also exactly what the test suite runs. Except where a
 command is specifically demonstrating the `--system-root` default scan,
@@ -144,7 +146,7 @@ cron-ledger --system-root /nonexistent \
 |---|---|
 | `0` | Everything is `OK` (ignoring `REBOOT_ONLY`/`UNSUPPORTED_TRIGGER`, which are informational only). |
 | `1` | At least one `MISSED` or `LATE`. |
-| `2` | Usage or input/output error (bad flags, `--until` earlier than `--since`, more than one stdin source, an explicitly-named input file that can't be read, an `--since`/`--until` window whose schedule would expand past the expected-run cap, or the report cannot be written). |
+| `2` | Usage or input/output error (bad flags, a `--since`/`--until` value that is neither an RFC3339 timestamp nor a duration, `--until` earlier than `--since`, more than one stdin source, an explicitly-named input file that can't be read, an `--since`/`--until` window whose schedule would expand past the expected-run cap, or the report cannot be written). |
 | `3` | No `MISSED`/`LATE`, but at least one `NO_TRACE`. |
 
 ## What it does NOT do
@@ -202,7 +204,8 @@ none of the numbers in this README are unmeasured benchmark badges.
 | `--json` emits a `schema_version: 1` report | `tests/cli_report.rs::json_flag_produces_a_schema_versioned_report`, `tests/report_golden.rs` |
 | The text report has no ANSI color on a non-tty, and respects `NO_COLOR` | `src/report/mod.rs::color_requires_both_a_tty_and_no_color_unset`, `tests/report_golden.rs::color_wraps_status_words_in_ansi_codes_when_enabled`, `tests/cli_report.rs::ok_scenario_exits_zero` |
 | At most one input source may read from stdin (`-`) | `src/cli.rs::at_most_one_stdin_source`, `tests/cli_report.rs::more_than_one_stdin_source_is_a_usage_error_exit_two` |
-| `--help` output | `tests/cli_report.rs::help_flag_matches_golden_usage_text` (`tests/golden/help.txt`) |
+| `--since`/`--until` accept an RFC3339 timestamp, kept as given, or a `systemd.time(7)` duration counted back from now (`30d`, `2h`). Any other value is a usage error and exits 2 | `src/app.rs::resolve_timestamp_accepts_rfc3339`, `src/app.rs::resolve_timestamp_accepts_a_duration_ago`, `src/app.rs::resolve_timestamp_rejects_garbage`, `src/cli.rs::usage_shows_until_accepts_rfc3339_or_a_duration` |
+| `--help` output | `tests/cli_report.rs::help_flag_matches_golden_usage_text` (`tests/golden/help.txt`), `src/cli.rs::usage_shows_until_accepts_rfc3339_or_a_duration` |
 | Read-only: running against a copy of every fixture with all write bits cleared changes nothing (not a byte, not an mtime) | `tests/readonly_fixtures.rs::running_against_a_read_only_fixture_copy_changes_nothing` |
 | Offline: no `socket`/`connect` syscall and no write-capable `openat`, observed under `strace` in CI (skipped, not failed, where `strace` is unavailable) | `tests/readonly_strace.rs::strace_sees_no_network_calls_and_no_write_capable_openat` |
 | No network crate (`reqwest`, `hyper`, `ureq`, `curl`) anywhere in the dependency tree | `.github/workflows/ci.yml`'s `readonly-static-check` and `deny` jobs, `deny.toml` |
