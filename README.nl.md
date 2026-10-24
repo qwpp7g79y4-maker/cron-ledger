@@ -6,7 +6,7 @@ Een gratis, open-source, alleen-lezen opdrachtregelprogramma in Rust. Het leest 
 
 Versie **0.1.0**. Licentie: `MIT OR Apache-2.0`.
 
-De tekstuitvoer gebruikt Nederlandse en Engelse labels door elkaar; de voorbeelden hieronder tonen die precies zoals de binary hem schrijft.
+De tekstuitvoer is Engels, dezelfde taal als `--help` en de statuswoorden (`expected`, `found`, `last run`, `Summary`, `Log coverage`, `Window`, `Tolerance`, `Warnings`, `… and N more`).
 
 ## Installatie
 
@@ -123,7 +123,7 @@ cron-ledger --system-root /nonexistent \
 |---|---|
 | `0` | Alles is `OK` (`REBOOT_ONLY`/`UNSUPPORTED_TRIGGER` tellen niet mee, die zijn alleen informatief). |
 | `1` | Minstens één `MISSED` of `LATE`. |
-| `2` | Gebruiks- of invoer/uitvoerfout (verkeerde opties, meer dan één stdin-bron, een expliciet opgegeven invoerbestand dat niet te lezen is, een `--since`/`--until`-venster waarvan de planning voorbij de limiet van verwachte runs uitdijt, of het rapport kan niet worden geschreven). |
+| `2` | Gebruiks- of invoer/uitvoerfout (verkeerde opties, `--until` eerder dan `--since`, meer dan één stdin-bron, een expliciet opgegeven invoerbestand dat niet te lezen is, een `--since`/`--until`-venster waarvan de planning voorbij de limiet van verwachte runs uitdijt, of het rapport kan niet worden geschreven). |
 | `3` | Geen `MISSED`/`LATE`, maar wel minstens één `NO_TRACE`. |
 
 ## Wat het NIET doet
