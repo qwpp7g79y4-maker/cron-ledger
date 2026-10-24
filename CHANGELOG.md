@@ -3,18 +3,79 @@
 All notable changes to this project are documented in this file, in the
 style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.1.0] - 2026-10-24
+
+First release. There is no earlier tag, so this lists every commit since
+the first one. The package version stays 0.1.0.
 
 ### Fixed
 
 - The default text report uses English labels (`expected`, `found`,
   `last run`, `Summary`, `Log coverage`, `Window`, `Tolerance`,
   `Warnings`, `… and N more`), the same language as `--help`, the
-  status words, and `--json`.
+  status words, and `--json`. (`a232068`)
+- Warn when a cron directory cannot be read, and note the example
+  fixture paths. (`fd98b0e`)
+- Count a oneshot timer run that only logs `Finished`. (`f884c3e`)
+- Stop expanding a schedule once it is over the run cap. (`447dc3a`)
+- Cap the number of warnings printed in the text report. (`6946727`)
+- Reject `--since`/`--until` windows that expand to too many runs.
+  (`e1ef0d1`)
+- Ignore journal records with duplicate keys. (`762f4bc`)
+- Do not scan the system root twice when `--crontab` is given.
+  (`ae09b6b`)
+- Do not report `MISSED` across a hole between syslog files.
+  (`5519bf9`)
+- Address review r2 findings B1-B3 and parser edge cases. (`91fc482`)
+- Address review r1 blocking findings B1-B4. (`a618b82`)
+- Reject a `--until` that is earlier than `--since` before the audit
+  runs. An equal bound stays an empty audit. Timer files that name the
+  same `Unit=` share one job key; their descriptions are combined, and
+  a repeated description is kept once. (`3bf85d3`)
+- Record a journal boot only when an entry shows it (a kernel banner,
+  or any entry within two minutes of monotonic zero), and use that
+  entry's own realtime. Take journal coverage from every entry with a
+  usable `__REALTIME_TIMESTAMP`. Parse a leading RFC3339 token,
+  including a numeric offset and `Z`, before the RFC3164 split.
+  (`01901ea`)
+- Point security reports at `Cargo.toml` for the version. Warn for
+  `/etc/cron.d` names Debian cron skips and cronie still runs. Split
+  crontab `%` the way cronie does, including an even run of
+  backslashes, and take the schedule timezone from `CRON_TZ` only.
+  Match jobs that share a command against one pool of runs, keep
+  internal command whitespace, and bound a late match of the last
+  expected time by the previous spacing. Accept a systemd unit start
+  only from the manager's own message. Decode every member of a
+  concatenated gzip log. Warn about a bad syslog timestamp only for a
+  recognized cron line. Escape control characters in the text report.
+  (`f2991cf`)
+- Track each day-of-month and day-of-week field's leading `*`
+  separately, so a stepped field such as `*/2` still counts as
+  unrestricted for cron's OR/AND day rule. Accept whitespace around
+  `=` in crontab environment lines. Canonicalize `\%` to `%` when
+  matching a logged command. A persistent catch-up claims a late run
+  only at or after the boot. Skip non-cron RFC5424 lines before
+  checking their timestamp. (`685b458`)
+- Skip `/etc/cron.d` files that cron itself ignores, so they cannot
+  produce a false `MISSED`. Merge schedule descriptions when two jobs
+  share a key. Prefer the journal `UNIT` field over `_SYSTEMD_UNIT`.
+  Skip cron PAM session lines. Warn instead of panicking on an
+  out-of-range syslog time or a span that does not fit in a
+  `Duration`, and saturate when summing timer tolerances. The
+  read-only tests require a completed audit. Document that
+  `cargo package` is not run in CI. (`4e5b08b`)
 
-## [0.1.0] - 2026-10-22
+### Changed
 
-Initial release.
+- Merge `fix/cronledger-fix-m1-0001` into `release/0.1.0`. (`a53632d`)
+- Keep local-only file names out of `.gitignore`. (`e0febc7`)
+- Run the strace check on Linux only. (`27c4f8f`)
+- Keep dev-dependencies on Rust 1.85 (`proptest` 1.11), and run the
+  permission-bit test on Unix only. (`d4523e7`)
+- Test in CI on Linux, Windows, macOS ARM and Intel, plus MSRV 1.85
+  with clippy. (`647b502`)
+- Initial release of the read-only crontab and systemd-timer audit.
+  (`b3ebefa`)
 
 ### Added
 
