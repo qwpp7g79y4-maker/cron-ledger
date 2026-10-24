@@ -15,6 +15,7 @@
 //! and it does not extend log coverage.
 
 use super::event::{EventSource, LogEvent, LogParseResult, LogWarning};
+use super::intern::Interner;
 use jiff::Timestamp;
 use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
@@ -141,10 +142,13 @@ fn extract_pid(obj: &serde_json::Map<String, Value>) -> Option<u32> {
 
 /// `(user) ACTION (arg)`, same body cronie/vixie write to syslog, minus
 /// the `TAG[pid]:` prefix the journal already splits into fields.
-fn parse_cron_message(msg: &str) -> Option<(String, String, String)> {
+/// Borrowed from `msg`: the caller interns `user` and `arg` rather than
+/// allocating a fresh `String` for text a real log repeats on almost
+/// every line.
+fn parse_cron_message(msg: &str) -> Option<(&str, &str, &str)> {
     let rest = msg.trim().strip_prefix('(')?;
     let close = rest.find(')')?;
-    let user = rest[..close].to_string();
+    let user = &rest[..close];
     let rest = rest[close + 1..].trim_start();
     let (action, arg_part) = rest.split_once(' ')?;
     let mut arg = arg_part.trim();
@@ -154,7 +158,7 @@ fn parse_cron_message(msg: &str) -> Option<(String, String, String)> {
     if let Some(stripped) = arg.strip_suffix(')') {
         arg = stripped;
     }
-    Some((user, action.to_string(), arg.to_string()))
+    Some((user, action, arg))
 }
 
 /// Debian/Ubuntu's cron writes a PAM session line for every run, tagged
@@ -259,6 +263,10 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
     // Shared by every event this call produces; see the same note on
     // `parse_syslog_cron` in `syslog.rs`.
     let file_rc: Rc<str> = Rc::from(file);
+    // Shared by every event this call produces, same reasoning as
+    // `file_rc`: a real journal repeats the same handful of users and
+    // commands on nearly every cron entry.
+    let mut interner = Interner::new();
     let mut events = Vec::new();
     let mut warnings = Vec::new();
     let mut coverage_timestamps = Vec::new();
@@ -375,15 +383,18 @@ pub fn parse_journal_json(content: &str, file: &str) -> LogParseResult {
             let pid = extract_pid(&obj);
             let source = match action.to_ascii_uppercase().as_str() {
                 "CMD" => Some(EventSource::CronCmd {
-                    user,
+                    user: interner.intern(user),
                     pid,
-                    command: arg,
+                    command: interner.intern(arg),
                 }),
-                "CMDOUT" => Some(EventSource::CronCmdOut { user, pid }),
-                "CMDEND" => Some(EventSource::CronCmdEnd {
-                    user,
+                "CMDOUT" => Some(EventSource::CronCmdOut {
+                    user: interner.intern(user),
                     pid,
-                    command: arg,
+                }),
+                "CMDEND" => Some(EventSource::CronCmdEnd {
+                    user: interner.intern(user),
+                    pid,
+                    command: interner.intern(arg),
                 }),
                 _ => None,
             };
@@ -446,9 +457,9 @@ mod tests {
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "alice".to_string(),
+                user: "alice".into(),
                 pid: None,
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             }
         );
     }
@@ -465,9 +476,9 @@ mod tests {
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "alice".to_string(),
+                user: "alice".into(),
                 pid: None,
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             }
         );
     }
@@ -479,9 +490,9 @@ mod tests {
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "alice".to_string(),
+                user: "alice".into(),
                 pid: Some(4242),
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             }
         );
     }
@@ -607,9 +618,9 @@ mod tests {
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: None,
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             }
         );
     }
@@ -624,9 +635,9 @@ mod tests {
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: None,
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             }
         );
     }
@@ -753,7 +764,7 @@ mod tests {
                 matches!(
                     &event.source,
                     EventSource::CronCmd { command, .. }
-                        if command == "/bin/backup.sh" || command == "/bin/other.sh"
+                        if command.as_ref() == "/bin/backup.sh" || command.as_ref() == "/bin/other.sh"
                 )
             }),
             "duplicate MESSAGE was used as evidence: {:?}",
@@ -762,7 +773,7 @@ mod tests {
         assert_eq!(result.events.len(), 1);
         assert!(matches!(
             &result.events[0].source,
-            EventSource::CronCmd { command, .. } if command == "/bin/ok.sh"
+            EventSource::CronCmd { command, .. } if command.as_ref() == "/bin/ok.sh"
         ));
         assert_eq!(result.warnings.len(), 1);
         assert_eq!(result.warnings[0].line, 1);

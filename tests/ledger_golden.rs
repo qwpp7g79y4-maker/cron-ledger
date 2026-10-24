@@ -19,9 +19,9 @@ fn cmd_event(file: &str, line: usize, when: &str, user: &str, command: &str) -> 
     LogEvent {
         timestamp: ts(when),
         source: EventSource::CronCmd {
-            user: user.to_string(),
+            user: user.into(),
             pid: None,
-            command: command.to_string(),
+            command: command.into(),
         },
         file: file.into(),
         line,
@@ -796,9 +796,9 @@ fn persistent_timer_missed_run_is_caught_up_late_via_boot_event() {
         LogEvent {
             timestamp: ts("2026-10-20T00:00:00Z"),
             source: EventSource::CronCmd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: None,
-                command: "unrelated.sh".to_string(),
+                command: "unrelated.sh".into(),
             },
             file: "syslog".into(),
             line: 1,
@@ -849,9 +849,9 @@ fn non_persistent_timer_missed_run_after_boot_stays_missed() {
         LogEvent {
             timestamp: ts("2026-10-20T00:00:00Z"),
             source: EventSource::CronCmd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: None,
-                command: "unrelated.sh".to_string(),
+                command: "unrelated.sh".into(),
             },
             file: "journal.jsonl".into(),
             line: 1,
@@ -879,9 +879,9 @@ fn cmdend_without_pid_is_paired_fifo_and_carries_exit_status() {
         LogEvent {
             timestamp: ts("2026-10-20T03:00:01Z"),
             source: EventSource::CronCmd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: None,
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             },
             file: "syslog".into(),
             line: 1,
@@ -889,9 +889,9 @@ fn cmdend_without_pid_is_paired_fifo_and_carries_exit_status() {
         LogEvent {
             timestamp: ts("2026-10-20T03:00:05Z"),
             source: EventSource::CronCmdEnd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: None,
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             },
             file: "syslog".into(),
             line: 2,

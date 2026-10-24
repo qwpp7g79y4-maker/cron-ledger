@@ -160,3 +160,44 @@ fn every_event_shares_one_allocation_for_the_file_label() {
     );
     assert_eq!(std::rc::Rc::strong_count(first), 10_000);
 }
+
+/// Follow-up to the file-label sharing above, for the overhead
+/// `cronledger-mem-0002.md` found still remaining after it: every event
+/// also used to hold its own allocation for `user` and `command`, even
+/// though a real log repeats the same handful of each on nearly every
+/// line (the same job firing over and over, logged by one of a handful
+/// of accounts). If per-event interning ever regresses, every event's
+/// `user`/`command` would point at a distinct allocation instead of
+/// sharing the parse call's interned copy.
+#[test]
+fn every_event_shares_one_allocation_for_repeated_user_and_command_text() {
+    let mut content = String::with_capacity(10_000 * 70);
+    for pid in 1..=10_000u32 {
+        content.push_str(&format!(
+            "Oct 20 03:00:{:02} web1 CRON[{pid}]: (root) CMD (/usr/local/bin/job.sh)\n",
+            pid % 60
+        ));
+    }
+    let since: Timestamp = "2026-10-20T00:00:00Z".parse().unwrap();
+    let result = parse_syslog_cron(&content, "shared-user-command.log", since, &TimeZone::UTC);
+
+    assert_eq!(result.events.len(), 10_000);
+    let cron_ledger::log::EventSource::CronCmd {
+        user: first_user,
+        command: first_command,
+        ..
+    } = &result.events[0].source
+    else {
+        panic!("expected a CronCmd event");
+    };
+    assert!(
+        result.events.iter().all(|e| matches!(
+            &e.source,
+            cron_ledger::log::EventSource::CronCmd { user, command, .. }
+                if std::rc::Rc::ptr_eq(user, first_user) && std::rc::Rc::ptr_eq(command, first_command)
+        )),
+        "events from the same parse call with identical user/command text must share one Rc allocation each"
+    );
+    assert_eq!(std::rc::Rc::strong_count(first_user), 10_000);
+    assert_eq!(std::rc::Rc::strong_count(first_command), 10_000);
+}

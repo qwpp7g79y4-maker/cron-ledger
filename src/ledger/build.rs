@@ -194,7 +194,7 @@ pub(crate) fn build_ledger_from_coverage(
             EventSource::CronCmd { user, command, .. }
             | EventSource::CronCmdEnd { user, command, .. } => {
                 let key = JobKey::Cron {
-                    user: user.clone(),
+                    user: user.to_string(),
                     command: super::job_key::normalize_command(command),
                 };
                 cron_events.entry(key).or_default().push(event);

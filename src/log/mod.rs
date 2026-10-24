@@ -4,6 +4,7 @@
 //! the caller passes a `.gz` path directly.
 
 mod event;
+mod intern;
 mod journal;
 mod source;
 mod syslog;

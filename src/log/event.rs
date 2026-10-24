@@ -14,23 +14,28 @@ pub enum EventSource {
     /// (Debian) or `CROND[pid]: (user) CMD (cmd)` (RHEL/cronie). This is
     /// the instant a matcher compares against a schedule's expected run
     /// times.
+    ///
+    /// `user` and `command` are interned per parse call (see
+    /// `super::intern::Interner`): a real log repeats the same handful
+    /// of users and commands once per run, so sharing the allocation
+    /// keeps that from growing with the line count.
     CronCmd {
-        user: String,
+        user: Rc<str>,
         pid: Option<u32>,
-        command: String,
+        command: Rc<str>,
     },
     /// cronie-only: a line of the command's captured output
     /// (`CMDOUT (...)`). Not a run instant by itself; kept only so a
     /// matcher can tell a job produced output.
-    CronCmdOut { user: String, pid: Option<u32> },
+    CronCmdOut { user: Rc<str>, pid: Option<u32> },
     /// cronie-only: the command finished (`CMDEND (...)`). Real-world
     /// cronie `CMDEND` lines do not carry a numeric exit code (confirmed
     /// against published `/var/log/cron` examples); this only marks that
     /// the run completed.
     CronCmdEnd {
-        user: String,
+        user: Rc<str>,
         pid: Option<u32>,
-        command: String,
+        command: Rc<str>,
     },
     /// A systemd timer-activated service run, from the manager's own
     /// `Started ...` or `Finished ...` message (`SYSLOG_IDENTIFIER=systemd`).

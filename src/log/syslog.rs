@@ -8,6 +8,7 @@
 use std::rc::Rc;
 
 use super::event::{EventSource, LogEvent, LogParseResult, LogWarning};
+use super::intern::Interner;
 use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
 use jiff::Timestamp;
@@ -157,12 +158,14 @@ fn is_cron_tag(name: &str) -> bool {
     name.eq_ignore_ascii_case("cron") || name.eq_ignore_ascii_case("crond")
 }
 
-/// Parse `(user) ACTION (arg)` into `(user, ACTION, arg)`.
-fn parse_cron_message(msg: &str) -> Option<(String, String, String)> {
+/// Parse `(user) ACTION (arg)` into `(user, ACTION, arg)`, borrowed from
+/// `msg`: the caller interns `user` and `arg` rather than allocating a
+/// fresh `String` for text a real log repeats on almost every line.
+fn parse_cron_message(msg: &str) -> Option<(&str, &str, &str)> {
     let msg = msg.trim();
     let rest = msg.strip_prefix('(')?;
     let close = rest.find(')')?;
-    let user = rest[..close].to_string();
+    let user = &rest[..close];
     let rest = rest[close + 1..].trim_start();
     let (action, arg_part) = rest.split_once(' ')?;
     let mut arg = arg_part.trim();
@@ -172,7 +175,7 @@ fn parse_cron_message(msg: &str) -> Option<(String, String, String)> {
     if let Some(stripped) = arg.strip_suffix(')') {
         arg = stripped;
     }
-    Some((user, action.to_string(), arg.to_string()))
+    Some((user, action, arg))
 }
 
 enum Outcome {
@@ -188,7 +191,7 @@ fn is_pam_session_message(message: &str) -> bool {
     message.starts_with("pam_unix(cron:session):")
 }
 
-fn classify(name: &str, pid: Option<u32>, message: &str) -> Outcome {
+fn classify(interner: &mut Interner, name: &str, pid: Option<u32>, message: &str) -> Outcome {
     if !is_cron_tag(name) {
         return Outcome::Skip;
     }
@@ -200,15 +203,18 @@ fn classify(name: &str, pid: Option<u32>, message: &str) -> Outcome {
     };
     match action.to_ascii_uppercase().as_str() {
         "CMD" => Outcome::Event(EventSource::CronCmd {
-            user,
+            user: interner.intern(user),
             pid,
-            command: arg,
+            command: interner.intern(arg),
         }),
-        "CMDOUT" => Outcome::Event(EventSource::CronCmdOut { user, pid }),
-        "CMDEND" => Outcome::Event(EventSource::CronCmdEnd {
-            user,
+        "CMDOUT" => Outcome::Event(EventSource::CronCmdOut {
+            user: interner.intern(user),
             pid,
-            command: arg,
+        }),
+        "CMDEND" => Outcome::Event(EventSource::CronCmdEnd {
+            user: interner.intern(user),
+            pid,
+            command: interner.intern(arg),
         }),
         _ => Outcome::Skip,
     }
@@ -218,6 +224,7 @@ fn classify(name: &str, pid: Option<u32>, message: &str) -> Outcome {
 /// Only the `-` (nil) structured-data value is supported; anything else is
 /// reported as a warning rather than guessed at.
 fn try_rfc5424(
+    interner: &mut Interner,
     line: &str,
     file: &str,
     line_no: usize,
@@ -263,7 +270,7 @@ fn try_rfc5424(
         }
     };
     let pid = procid.parse::<u32>().ok();
-    match classify(app, pid, message) {
+    match classify(interner, app, pid, message) {
         Outcome::Event(source) => Some((timestamp, source)),
         Outcome::Skip => None,
         Outcome::Garbage(reason) => {
@@ -312,6 +319,7 @@ fn looks_like_leading_rfc3339(line: &str) -> bool {
 /// apply. A non-cron line is skipped. A cron line whose timestamp does
 /// not parse is a warning, same as a bad RFC3164 timestamp.
 fn parse_leading_rfc3339(
+    interner: &mut Interner,
     line: &str,
     file: &Rc<str>,
     line_no: usize,
@@ -325,7 +333,7 @@ fn parse_leading_rfc3339(
         return;
     };
     let (name, pid) = parse_tag(tag);
-    let outcome = classify(name, pid, message);
+    let outcome = classify(interner, name, pid, message);
     if matches!(outcome, Outcome::Skip) {
         return;
     }
@@ -377,6 +385,10 @@ pub fn parse_syslog_cron(
     let mut events = Vec::new();
     let mut warnings = Vec::new();
     let mut years = YearInference::new(tz, since);
+    // Shared by every event this call produces, same reasoning as
+    // `file_rc`: a real log repeats the same handful of users and
+    // commands on nearly every line.
+    let mut interner = Interner::new();
 
     for (idx, raw_line) in content.lines().enumerate() {
         let line_no = idx + 1;
@@ -390,7 +402,9 @@ pub fn parse_syslog_cron(
         // is the same line with the priority removed.
         if let Some(after_pri) = strip_pri(line) {
             if looks_like_rfc5424_version(after_pri) {
-                if let Some((timestamp, source)) = try_rfc5424(line, file, line_no, &mut warnings) {
+                if let Some((timestamp, source)) =
+                    try_rfc5424(&mut interner, line, file, line_no, &mut warnings)
+                {
                     events.push(LogEvent {
                         timestamp,
                         source,
@@ -402,7 +416,9 @@ pub fn parse_syslog_cron(
             }
             line = after_pri;
         } else if line.starts_with('<') {
-            if let Some((timestamp, source)) = try_rfc5424(line, file, line_no, &mut warnings) {
+            if let Some((timestamp, source)) =
+                try_rfc5424(&mut interner, line, file, line_no, &mut warnings)
+            {
                 events.push(LogEvent {
                     timestamp,
                     source,
@@ -418,7 +434,14 @@ pub fn parse_syslog_cron(
         // consume the timestamp, the host, the tag, and the user, and
         // then drop the line because the remainder has no ": ".
         if looks_like_leading_rfc3339(line) {
-            parse_leading_rfc3339(line, &file_rc, line_no, &mut events, &mut warnings);
+            parse_leading_rfc3339(
+                &mut interner,
+                line,
+                &file_rc,
+                line_no,
+                &mut events,
+                &mut warnings,
+            );
             continue;
         }
 
@@ -433,7 +456,7 @@ pub fn parse_syslog_cron(
             continue;
         };
         let (name, pid) = parse_tag(tag);
-        let outcome = classify(name, pid, message);
+        let outcome = classify(&mut interner, name, pid, message);
         if matches!(outcome, Outcome::Skip) {
             continue;
         }
@@ -527,9 +550,9 @@ mod tests {
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "alice".to_string(),
+                user: "alice".into(),
                 pid: Some(1234),
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             }
         );
         assert_eq!(
@@ -624,9 +647,9 @@ Jan  1 00:01:00 host CRON[2]: (alice) CMD (x)
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: Some(1),
-                command: "/bin/backup.sh".to_string(),
+                command: "/bin/backup.sh".into(),
             }
         );
     }
@@ -662,9 +685,9 @@ Jan  1 00:01:00 host CRON[2]: (alice) CMD (x)
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: None,
-                command: "/bin/backup.sh x[1]: y".to_string(),
+                command: "/bin/backup.sh x[1]: y".into(),
             }
         );
     }
@@ -693,9 +716,9 @@ Jan  1 00:01:00 host CRON[2]: (alice) CMD (x)
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "alice".to_string(),
+                user: "alice".into(),
                 pid: Some(1234),
-                command: "backup.sh".to_string(),
+                command: "backup.sh".into(),
             }
         );
     }
@@ -726,9 +749,9 @@ Jan  1 00:01:00 host CRON[2]: (alice) CMD (x)
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "alice".to_string(),
+                user: "alice".into(),
                 pid: Some(1),
-                command: "date +\\%F".to_string(),
+                command: "date +\\%F".into(),
             }
         );
     }
@@ -773,9 +796,9 @@ Oct 20 03:00:01 web1 CRON[5]: (alice) CMD (echo ok)
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "alice".to_string(),
+                user: "alice".into(),
                 pid: Some(5),
-                command: "echo ok".to_string(),
+                command: "echo ok".into(),
             }
         );
     }
@@ -794,9 +817,9 @@ Oct 20 03:00:01 web1 CRON[5]: (alice) CMD (echo ok)
         assert_eq!(
             result.events[0].source,
             EventSource::CronCmd {
-                user: "root".to_string(),
+                user: "root".into(),
                 pid: Some(1),
-                command: "x".to_string(),
+                command: "x".into(),
             }
         );
     }
