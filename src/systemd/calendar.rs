@@ -193,7 +193,7 @@ fn looks_like_date_or_time(tok: &str) -> bool {
     if tok.contains('-') {
         // A date like "2026-03-29" or "*-*-*" only ever has '-'-separated
         // parts that are "*" or start with a digit. An IANA timezone name
-        // can also contain a hyphen (e.g. "Pacific/Port-Moresby"), but its
+        // can also contain a hyphen (e.g. "America/Port-au-Prince"), but its
         // parts don't look like that.
         return tok
             .split('-')
@@ -360,23 +360,45 @@ fn parse_time(text: &str) -> Result<(CalComponent, CalComponent, CalComponent), 
     Ok((hour, minute, second))
 }
 
+/// Resolve `name` as an IANA timezone, rejecting it at parse time rather
+/// than deferring to `expand`/`first_on_or_after`: a real `[Timer]` unit
+/// with an unresolvable name otherwise got this same message a second
+/// time, plus an unrelated, misleading "schedule can never run" warning
+/// from the end-of-loop check in `app.rs` (see breaktest-cronledger-0008).
+fn validate_timezone(name: &str) -> Result<(), String> {
+    jiff::tz::TimeZone::get(name)
+        .map(|_| ())
+        .map_err(|e| format!("unknown timezone '{name}': {e}"))
+}
+
 /// Parse one `OnCalendar=`-style systemd calendar expression.
 pub fn parse(input: &str) -> Result<SystemdCalendar, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err("empty calendar expression".to_string());
     }
-    if let Some(special) = parse_special(trimmed) {
-        return Ok(special);
-    }
 
     let mut tokens: Vec<&str> = trimmed.split_whitespace().collect();
 
     let timezone = if tokens.len() > 1 && !looks_like_date_or_time(tokens[tokens.len() - 1]) {
-        Some(tokens.pop().unwrap().to_string())
+        let tz = tokens.pop().unwrap().to_string();
+        validate_timezone(&tz)?;
+        Some(tz)
     } else {
         None
     };
+
+    // A named special (`daily`, `weekly`, ...) is exactly one token once
+    // a trailing timezone has been split off; `systemd-analyze` accepts
+    // such a timezone suffix on a named special (e.g. "daily UTC"), but
+    // `parse_special` only ever matches the bare name, not the whole
+    // "name tz" string (see breaktest-cronledger-0008).
+    if tokens.len() == 1 {
+        if let Some(mut special) = parse_special(tokens[0]) {
+            special.timezone = timezone;
+            return Ok(special);
+        }
+    }
 
     let weekdays = if !tokens.is_empty() && looks_like_weekday_spec(tokens[0]) {
         parse_weekday_component(tokens.remove(0))?
@@ -662,9 +684,9 @@ mod tests {
         // Regression: `looks_like_date_or_time` treated any token
         // containing '-' as a date (to tell "*-*-* 03:00:00" apart from
         // a trailing tz name), which misclassified IANA zone names that
-        // themselves contain a hyphen, like "Pacific/Port-Moresby".
-        let cal = parse("*-*-* 03:00:00 Pacific/Port-Moresby").unwrap();
-        assert_eq!(cal.timezone.as_deref(), Some("Pacific/Port-Moresby"));
+        // themselves contain a hyphen, like "America/Port-au-Prince".
+        let cal = parse("*-*-* 03:00:00 America/Port-au-Prince").unwrap();
+        assert_eq!(cal.timezone.as_deref(), Some("America/Port-au-Prince"));
     }
 
     #[test]
@@ -676,6 +698,38 @@ mod tests {
         let got = expand(&cal, &TimeZone::UTC, since, until).unwrap();
         let z = got[0].to_zoned(TimeZone::get("Europe/Amsterdam").unwrap());
         assert_eq!(z.to_string(), "2026-01-01T03:00:00+01:00[Europe/Amsterdam]");
+    }
+
+    #[test]
+    fn named_special_with_trailing_timezone_matches_systemd_analyze() {
+        // Regression: `systemd-analyze calendar` (249) accepts a trailing
+        // timezone on a named special ("daily UTC" normalizes to
+        // "*-*-* 00:00:00 UTC"), but `parse_special` only ever saw the
+        // whole trimmed string, so any trailing word made it miss the
+        // name and fall through to a failing time parse. See
+        // breaktest-cronledger-0008.
+        for (expr, tz) in [
+            ("daily UTC", "UTC"),
+            ("weekly Europe/Amsterdam", "Europe/Amsterdam"),
+            ("hourly Europe/Amsterdam", "Europe/Amsterdam"),
+        ] {
+            let cal = parse(expr).unwrap_or_else(|e| panic!("'{expr}' should parse: {e}"));
+            assert_eq!(cal.timezone.as_deref(), Some(tz));
+        }
+    }
+
+    #[test]
+    fn unknown_timezone_name_is_rejected_at_parse_not_only_at_expand() {
+        // Regression: the timezone name was stored unchecked and only
+        // resolved later in expand()/first_on_or_after(), so a real timer
+        // unit got both the correct "unknown timezone" warning AND a
+        // misleading extra "can never run" warning from app.rs's
+        // end-of-loop check. See breaktest-cronledger-0008.
+        let err = parse("*-*-* 12:00:00 Mars/Nonexistent").unwrap_err();
+        assert!(
+            err.contains("unknown timezone"),
+            "expected an 'unknown timezone' parse error, got: {err}"
+        );
     }
 
     #[test]

@@ -1063,6 +1063,44 @@ mod tests {
     }
 
     #[test]
+    fn unknown_timezone_name_does_not_also_warn_that_the_schedule_never_runs() {
+        // Regression: an unresolvable timezone name used to parse `Ok`,
+        // so the end-of-loop "can never run" check in app.rs could not
+        // tell it apart from a genuinely impossible date and added a
+        // second, misleading warning on top of the real "unknown
+        // timezone" one. See breaktest-cronledger-0008.
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-bad-tz-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let timer_path = dir.join("d.timer");
+        std::fs::write(
+            &timer_path,
+            "[Timer]\nOnCalendar=*-*-* 12:00:00 Mars/Nonexistent\nUnit=d.service\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            timer_units: vec![InputPath::File(timer_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(
+            warnings.contains("unknown timezone"),
+            "expected the real diagnosis, got: {warnings}"
+        );
+        assert!(
+            !warnings.contains("can never run"),
+            "unknown timezone should not also claim the schedule can never run, got: {warnings}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn impossible_systemd_calendar_warns_that_the_schedule_never_runs() {
         // Regression: `*-02-31 00:00:00` parses `Ok` with 0 expected runs
         // and no warning (breaktest-cronledger-0005), unlike
