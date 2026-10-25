@@ -119,6 +119,8 @@ fn build_schedule(fields: &[&str], base: usize) -> Result<Schedule, String> {
         dow: parse_field(&DOW, fields[base + 4]).map_err(|e| format!("day-of-week: {e}"))?,
         dom_star: fields[base + 2].starts_with('*'),
         dow_star: fields[base + 4].starts_with('*'),
+        minute_star: fields[base].starts_with('*'),
+        hour_star: fields[base + 1].starts_with('*'),
     })
 }
 
@@ -132,6 +134,8 @@ fn special_as_schedule(spec: &SpecialSchedule) -> Schedule {
         dow: parse_field(&DOW, spec.dow).unwrap(),
         dom_star: spec.dom.starts_with('*'),
         dow_star: spec.dow.starts_with('*'),
+        minute_star: spec.minute.starts_with('*'),
+        hour_star: spec.hour.starts_with('*'),
     }
 }
 
@@ -275,6 +279,8 @@ mod tests {
             dow: Field::Star,
             dom_star: true,
             dow_star: true,
+            minute_star: true,
+            hour_star: true,
         }
     }
 

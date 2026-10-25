@@ -11,6 +11,12 @@ version stays 0.1.0.
 
 ### Fixed
 
+- The crontab DST rule only treated an hour field of exactly `*` as a
+  wildcard, so `0 */2 * * *` ran once in the repeated autumn hour while
+  `0 */1 * * *` ran twice, and `*/15 2 * * *` was caught up after the
+  spring jump. Like cronie's `MIN_STAR`/`HR_STAR`, a minute or hour
+  field starting with `*` now makes the job wildcard: it runs in both
+  copies of a repeated time and skips a time in the gap.
 - A systemd calendar bare value or range bound outside its field's own
   range (`*:*:60`, `*:60:00`, `*-13-*`) parsed and stored a value that
   can never occur, unlike `systemd-analyze calendar`, which rejects it.
