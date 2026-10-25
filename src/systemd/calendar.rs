@@ -239,7 +239,13 @@ fn parse_weekday_component(tok: &str) -> Result<WeekdaySpec, String> {
     Ok(WeekdaySpec::Some(set))
 }
 
-fn parse_cal_component(text: &str) -> Result<CalComponent, String> {
+/// Parse one calendar component. `bounds`, when given as `(min, max)`, is
+/// the field's own legal span (e.g. `(0, 59)` for minutes); a `/step` wider
+/// than `max - min` can only ever match its own start value, which is
+/// exactly what real `systemd-analyze` rejects as "Invalid argument"
+/// instead of silently accepting (see breaktest-cronledger-0004). `year`
+/// has no such span and passes `None`.
+fn parse_cal_component(text: &str, bounds: Option<(u32, u32)>) -> Result<CalComponent, String> {
     if text == "*" {
         return Ok(CalComponent::Any);
     }
@@ -264,6 +270,13 @@ fn parse_cal_component(text: &str) -> Result<CalComponent, String> {
         };
         if step == Some(0) {
             return Err("step cannot be zero".to_string());
+        }
+        if let (Some(step), Some((min, max))) = (step, bounds) {
+            if step > max - min {
+                return Err(format!(
+                    "step '{step}' is wider than this field's range of {min}..={max}"
+                ));
+            }
         }
         let item = if range_part == "*" {
             CalItem {
@@ -307,9 +320,9 @@ fn parse_date(text: &str) -> Result<(CalComponent, CalComponent, CalComponent), 
         return Err(format!("'{text}' is not a year-month-day date"));
     }
     Ok((
-        parse_cal_component(parts[0]).map_err(|e| format!("year: {e}"))?,
-        parse_cal_component(parts[1]).map_err(|e| format!("month: {e}"))?,
-        parse_cal_component(parts[2]).map_err(|e| format!("day: {e}"))?,
+        parse_cal_component(parts[0], None).map_err(|e| format!("year: {e}"))?,
+        parse_cal_component(parts[1], Some((1, 12))).map_err(|e| format!("month: {e}"))?,
+        parse_cal_component(parts[2], Some((1, 31))).map_err(|e| format!("day: {e}"))?,
     ))
 }
 
@@ -318,10 +331,11 @@ fn parse_time(text: &str) -> Result<(CalComponent, CalComponent, CalComponent), 
     if parts.len() != 2 && parts.len() != 3 {
         return Err(format!("'{text}' is not an hour:minute[:second] time"));
     }
-    let hour = parse_cal_component(parts[0]).map_err(|e| format!("hour: {e}"))?;
-    let minute = parse_cal_component(parts[1]).map_err(|e| format!("minute: {e}"))?;
+    let hour = parse_cal_component(parts[0], Some((0, 23))).map_err(|e| format!("hour: {e}"))?;
+    let minute =
+        parse_cal_component(parts[1], Some((0, 59))).map_err(|e| format!("minute: {e}"))?;
     let second = if parts.len() == 3 {
-        parse_cal_component(parts[2]).map_err(|e| format!("second: {e}"))?
+        parse_cal_component(parts[2], Some((0, 59))).map_err(|e| format!("second: {e}"))?
     } else {
         single(0)
     };
@@ -667,5 +681,17 @@ mod tests {
     fn garbage_is_an_error() {
         assert!(parse("not a calendar expression").is_err());
         assert!(parse("").is_err());
+    }
+
+    #[test]
+    fn step_wider_than_the_field_range_is_rejected() {
+        // Regression: `systemd-analyze calendar '*:0/100:00'` fails with
+        // "Invalid argument" since a minute step past 59 can only ever
+        // match the start value; this parser used to accept it and
+        // expand() to minute 0 every hour, see breaktest-cronledger-0004.
+        assert!(parse("*:0/60:00").is_err());
+        assert!(parse("*:0/100:00").is_err());
+        // A step up to the field's own span (0..=59) stays valid.
+        assert!(parse("*:0/59:00").is_ok());
     }
 }
