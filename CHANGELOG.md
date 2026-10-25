@@ -18,6 +18,10 @@ version stays 0.1.0.
 - A systemd calendar step wider than its field's range (`*:0/100:00`)
   parsed and expanded to minute 0 every hour, unlike
   `systemd-analyze calendar`, which rejects it. (`8adc457`)
+- A systemd calendar `/step` applied to a bare `*` (`*:*/5:00`,
+  `*-*-*/1`) was accepted as "every step", unlike
+  `systemd-analyze calendar`, which rejects it; steps on an explicit
+  start (`*:0/5:00`) still work.
 - `--help` and both README synopses listed `--until` as RFC3339 only.
   `--until` takes an RFC3339 timestamp or a duration counted back from
   now, the same as `--since`. (`f900524`)

@@ -271,6 +271,11 @@ fn parse_cal_component(text: &str, bounds: Option<(u32, u32)>) -> Result<CalComp
         if step == Some(0) {
             return Err("step cannot be zero".to_string());
         }
+        if range_part == "*" && step.is_some() {
+            return Err(
+                "'*/step' is not allowed; give the step an explicit start value".to_string(),
+            );
+        }
         if let (Some(step), Some((min, max))) = (step, bounds) {
             if step > max - min {
                 return Err(format!(
@@ -693,5 +698,18 @@ mod tests {
         assert!(parse("*:0/100:00").is_err());
         // A step up to the field's own span (0..=59) stays valid.
         assert!(parse("*:0/59:00").is_ok());
+    }
+
+    #[test]
+    fn star_with_a_step_is_rejected() {
+        // Regression: `*/step` (no explicit start) used to be accepted
+        // and treated as if it meant "every step", but real
+        // `systemd-analyze calendar` (249) rejects any `/step` applied to
+        // a bare `*` with "Invalid argument" in every field.
+        assert!(parse("*:*/5:00").is_err());
+        assert!(parse("*-*-*/1").is_err());
+        assert!(parse("*-*/3-*").is_err());
+        // A step on an explicit start is still fine.
+        assert!(parse("*:0/5:00").is_ok());
     }
 }
