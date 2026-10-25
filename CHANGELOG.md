@@ -11,6 +11,9 @@ version stays 0.1.0.
 
 ### Fixed
 
+- A systemd calendar bare value or range bound outside its field's own
+  range (`*:*:60`, `*:60:00`, `*-13-*`) parsed and stored a value that
+  can never occur, unlike `systemd-analyze calendar`, which rejects it.
 - A crontab or `OnCalendar=` date that can never occur (`0 0 31 2 *`,
   `*-02-31 00:00:00`) stored a job with 0 expected runs and no
   warning. Warn instead, without rejecting the job and without

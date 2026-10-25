@@ -283,6 +283,16 @@ fn parse_cal_component(text: &str, bounds: Option<(u32, u32)>) -> Result<CalComp
                 ));
             }
         }
+        let check_bound = |v: u32| -> Result<(), String> {
+            if let Some((min, max)) = bounds {
+                if v < min || v > max {
+                    return Err(format!(
+                        "'{v}' is outside this field's range of {min}..={max}"
+                    ));
+                }
+            }
+            Ok(())
+        };
         let item = if range_part == "*" {
             CalItem {
                 start: 0,
@@ -299,6 +309,8 @@ fn parse_cal_component(text: &str, bounds: Option<(u32, u32)>) -> Result<CalComp
             if start > end {
                 return Err(format!("'{range_part}' is a backwards range"));
             }
+            check_bound(start)?;
+            check_bound(end)?;
             CalItem {
                 start,
                 end: Some(end),
@@ -308,6 +320,7 @@ fn parse_cal_component(text: &str, bounds: Option<(u32, u32)>) -> Result<CalComp
             let v = range_part
                 .parse::<u32>()
                 .map_err(|_| format!("'{range_part}' is not a number"))?;
+            check_bound(v)?;
             CalItem {
                 start: v,
                 end: None,
@@ -698,6 +711,39 @@ mod tests {
         assert!(parse("*:0/100:00").is_err());
         // A step up to the field's own span (0..=59) stays valid.
         assert!(parse("*:0/59:00").is_ok());
+    }
+
+    #[test]
+    fn bare_value_outside_the_field_range_is_rejected() {
+        // Regression: a bare value (no range, no step) was stored without
+        // ever being checked against the field's own min..=max, so
+        // `*:*:60` parsed as "second 60", a value that can never occur,
+        // unlike `systemd-analyze calendar` (249), which rejects it with
+        // "Invalid argument". See breaktest-cronledger-0007.
+        assert!(parse("*:*:60").is_err());
+        assert!(parse("*:60:00").is_err());
+        assert!(parse("25:00:00").is_err());
+        assert!(parse("*-13-*").is_err());
+        assert!(parse("*-*-32").is_err());
+        // The field's own min is also enforced (month/day are 1-based).
+        assert!(parse("*-0-*").is_err());
+        assert!(parse("*-*-0").is_err());
+        // In-range values stay valid.
+        assert!(parse("*:*:59").is_ok());
+        assert!(parse("*:*:0/15").is_ok());
+        assert!(parse("*:0/5:00").is_ok());
+    }
+
+    #[test]
+    fn range_bound_outside_the_field_range_is_rejected() {
+        // Same check, but for a `start..end` range whose bound (not just a
+        // bare value) falls outside min..=max; real `systemd-analyze
+        // calendar` rejects these too, even when the other bound is fine.
+        assert!(parse("*:50..65:00").is_err());
+        assert!(parse("*:*:50..65").is_err());
+        assert!(parse("*-1..13-*").is_err());
+        assert!(parse("*-*-1..32").is_err());
+        assert!(parse("*:0..59:00").is_ok());
     }
 
     #[test]
