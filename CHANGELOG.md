@@ -11,6 +11,13 @@ version stays 0.1.0.
 
 ### Fixed
 
+- A crontab or `OnCalendar=` date that can never occur (`0 0 31 2 *`,
+  `*-02-31 00:00:00`) stored a job with 0 expected runs and no
+  warning. Warn instead, without rejecting the job and without
+  flagging a real but infrequent date like 29 February. (`92b0ae9`)
+- A systemd calendar step wider than its field's range (`*:0/100:00`)
+  parsed and expanded to minute 0 every hour, unlike
+  `systemd-analyze calendar`, which rejects it. (`8adc457`)
 - `--help` and both README synopses listed `--until` as RFC3339 only.
   `--until` takes an RFC3339 timestamp or a duration counted back from
   now, the same as `--since`. (`f900524`)
