@@ -158,6 +158,19 @@ impl Collector {
                 // slot's run is not reported as LATE for the last
                 // in-window time.
                 let next_after_window = schedule::first_on_or_after(s, &tz, until);
+                // `first_on_or_after` searches ~11 years ahead, far enough
+                // to still find a real but infrequent date (29 February);
+                // `None` alongside an empty window past that horizon means
+                // the schedule names a date that can never occur at all
+                // (e.g. `31 2`), matching systemd's "Next elapse: never"
+                // instead of silently storing a job with 0 expected runs
+                // (breaktest-cronledger-0005).
+                if expected.is_empty() && next_after_window.is_none() {
+                    self.warnings.push(format!(
+                        "{}:{}: schedule can never run (no such date exists)",
+                        job.file, job.line
+                    ));
+                }
                 (
                     JobSchedule::Standard(expected),
                     describe_schedule(s),
@@ -486,31 +499,55 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                         .flatten()
                 }
             };
+            // Independent of `Persistent=true` above: whether any
+            // `OnCalendar=` line ever elapses at all, from `since` onward
+            // (searched up to ~11 years ahead, far enough to still find a
+            // real but infrequent date like 29 February). Stays `false`
+            // only for a date that can never occur (e.g. `*-02-31`),
+            // matching systemd's "Next elapse: never" (breaktest-cronledger-0005).
+            let mut any_calendar_ever_elapses = false;
+            let mut any_calendar_parsed = false;
             for cal_str in &timer.on_calendar {
                 match systemd::parse_calendar(cal_str) {
-                    Ok(cal) => match systemd::expand_calendar_bounded(
-                        &cal,
-                        &tz,
-                        since,
-                        until,
-                        c.remaining_budget(),
-                    ) {
-                        Ok(times) => {
-                            c.account_expected_runs(&label, times.len())?;
-                            all_times.extend(times);
-                            if let Some(t) = next_elapse(&cal) {
-                                next_after_window =
-                                    Some(next_after_window.map_or(t, |prev| prev.min(t)));
-                            }
+                    Ok(cal) => {
+                        any_calendar_parsed = true;
+                        if !any_calendar_ever_elapses
+                            && matches!(
+                                systemd::first_calendar_on_or_after(&cal, &tz, since),
+                                Ok(Some(_))
+                            )
+                        {
+                            any_calendar_ever_elapses = true;
                         }
-                        Err(e) => c
-                            .warnings
-                            .push(format!("{label}: OnCalendar '{cal_str}': {e}")),
-                    },
+                        match systemd::expand_calendar_bounded(
+                            &cal,
+                            &tz,
+                            since,
+                            until,
+                            c.remaining_budget(),
+                        ) {
+                            Ok(times) => {
+                                c.account_expected_runs(&label, times.len())?;
+                                all_times.extend(times);
+                                if let Some(t) = next_elapse(&cal) {
+                                    next_after_window =
+                                        Some(next_after_window.map_or(t, |prev| prev.min(t)));
+                                }
+                            }
+                            Err(e) => c
+                                .warnings
+                                .push(format!("{label}: OnCalendar '{cal_str}': {e}")),
+                        }
+                    }
                     Err(e) => c
                         .warnings
                         .push(format!("{label}: OnCalendar '{cal_str}': {e}")),
                 }
+            }
+            if any_calendar_parsed && all_times.is_empty() && !any_calendar_ever_elapses {
+                c.warnings.push(format!(
+                    "{label}: OnCalendar schedule can never run (no such date exists)"
+                ));
             }
             all_times.sort();
             all_times.dedup();
@@ -965,6 +1002,96 @@ mod tests {
         assert!(
             description.contains("0 15"),
             "description {description:?} lost the second schedule"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn impossible_crontab_date_warns_that_the_schedule_never_runs() {
+        // Regression: `0 0 31 2 *` (31 February does not exist) stores a
+        // job with 0 expected runs and no warning (breaktest-cronledger-0005);
+        // `systemd-analyze --iterations=1 calendar` would say
+        // "Next elapse: never" for the equivalent case.
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-impossible-date-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "0 0 31 2 * root /bin/never.sh\n").unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(
+            warnings.contains("never"),
+            "expected a 'can never run' warning, got: {warnings}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn leap_day_crontab_does_not_warn_even_without_runs_in_window() {
+        // 29 February is a real (if infrequent) date; a window that
+        // misses it must not be flagged as "never runs".
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-leap-day-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let crontab_path = dir.join("crontab");
+        std::fs::write(&crontab_path, "0 0 29 2 * root /bin/leap.sh\n").unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            system_root: dir.clone(),
+            crontabs: vec![InputPath::File(crontab_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(
+            !warnings.contains("never"),
+            "29 February must not be flagged as never running: {warnings}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn impossible_systemd_calendar_warns_that_the_schedule_never_runs() {
+        // Regression: `*-02-31 00:00:00` parses `Ok` with 0 expected runs
+        // and no warning (breaktest-cronledger-0005), unlike
+        // `systemd-analyze` which reports "Next elapse: never".
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-impossible-timer-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let timer_path = dir.join("never.timer");
+        std::fs::write(
+            &timer_path,
+            "[Timer]\nOnCalendar=*-02-31 00:00:00\nUnit=never.service\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            timer_units: vec![InputPath::File(timer_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(
+            warnings.contains("never"),
+            "expected a 'can never run' warning, got: {warnings}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }
