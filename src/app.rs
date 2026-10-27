@@ -55,7 +55,8 @@ fn resolve_timestamp(value: &str, now: Timestamp) -> Result<Timestamp, String> {
 
 /// Read a crontab or timer unit as text. A non-UTF-8 byte is replaced and
 /// noted as a warning, like a syslog's, so one bad byte does not fail the
-/// whole run. A missing or unreadable file is still an error.
+/// whole run. A missing or unreadable file is still an error. The warning
+/// names only the first invalid byte, by 1-based line and 0-based byte offset.
 fn read_text(path: &InputPath, warnings: &mut Vec<String>) -> Result<String, String> {
     let bytes = match path {
         InputPath::Stdin => {
@@ -71,10 +72,11 @@ fn read_text(path: &InputPath, warnings: &mut Vec<String>) -> Result<String, Str
     match String::from_utf8(bytes) {
         Ok(text) => Ok(text),
         Err(e) => {
+            let at = e.utf8_error().valid_up_to();
+            let line = 1 + e.as_bytes()[..at].iter().filter(|&&b| b == b'\n').count();
             warnings.push(format!(
-                "{}: invalid UTF-8 at byte {}; replaced so the rest of the file can be read",
+                "{}:{line}: invalid UTF-8 at byte {at}; replaced so the rest of the file can be read",
                 path.label(),
-                e.utf8_error().valid_up_to()
             ));
             Ok(String::from_utf8_lossy(e.as_bytes()).into_owned())
         }

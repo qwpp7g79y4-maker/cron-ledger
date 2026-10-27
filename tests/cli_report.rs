@@ -534,12 +534,36 @@ NotAMonth 99 99:99:99 web1 CRON[4]: (root) CMD (/usr/local/bin/backup.sh)\n\xff\
 }
 
 /// A crontab or timer unit with a non-UTF-8 byte is read lossily: a
-/// warning names the file, and the valid lines still count.
+/// warning names the file, line and byte, and the valid lines still count.
+/// The bad byte is the 14th byte (offset 13) and sits on line 2; the job
+/// is on line 3.
 fn bad_utf8_crontab() -> Vec<u8> {
-    let mut bytes = b"# caf".to_vec();
+    let mut bytes = b"# daily\n# caf".to_vec();
     bytes.push(0xe9);
     bytes.extend(b"\n0 3 * * * root /usr/local/bin/backup.sh\n");
     bytes
+}
+
+/// The warning must be exactly this line, not a substring of other output.
+fn assert_utf8_warning(text: &str, label: &str, line: usize, byte: usize) {
+    let want = format!(
+        "  - {label}:{line}: invalid UTF-8 at byte {byte}; replaced so the rest of the file can be read"
+    );
+    assert!(
+        text.lines().any(|l| l == want),
+        "missing {want:?} in:\n{text}"
+    );
+}
+
+/// The job itself, not the Summary line, must be reported OK.
+fn assert_backup_job_ok(text: &str) {
+    let lines: Vec<&str> = text.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.starts_with("root: /usr/local/bin/backup.sh ("))
+        .unwrap_or_else(|| panic!("no backup.sh job line in:\n{text}"));
+    assert!(lines[at].contains(":3)"), "{text}");
+    assert!(lines[at + 2].ends_with("(OK)"), "{text}");
 }
 
 fn lossy_cmd(root: &Path) -> Command {
@@ -574,10 +598,8 @@ fn crontab_file_with_a_non_utf8_byte_is_a_warning_not_exit_two() {
         .assert()
         .code(0);
     let text = combined_output(assert.get_output());
-    assert!(text.contains("bin.dat"), "{text}");
-    assert!(text.contains("invalid UTF-8"), "{text}");
-    assert!(text.contains("backup.sh"), "{text}");
-    assert!(text.contains("OK"), "{text}");
+    assert_utf8_warning(&text, &path.display().to_string(), 2, 13);
+    assert_backup_job_ok(&text);
     std::fs::remove_dir_all(&root).ok();
 }
 
@@ -591,9 +613,33 @@ fn crontab_on_stdin_with_a_non_utf8_byte_is_a_warning_not_exit_two() {
         .assert()
         .code(0);
     let text = combined_output(assert.get_output());
-    assert!(text.contains("<stdin>"), "{text}");
-    assert!(text.contains("invalid UTF-8"), "{text}");
-    assert!(text.contains("backup.sh"), "{text}");
+    assert_utf8_warning(&text, "<stdin>", 2, 13);
+    assert_backup_job_ok(&text);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn crontab_user_with_a_non_utf8_byte_is_a_warning_not_exit_two() {
+    let root = empty_root();
+    let path = root.join("alice.tab");
+    // A user crontab has no user column; the job is on line 3. The fixture
+    // syslog has no run for alice, so the job is NO_TRACE (exit 3).
+    let mut bytes = b"# daily\n# caf".to_vec();
+    bytes.push(0xe9);
+    bytes.extend(b"\n0 3 * * * /usr/local/bin/backup.sh\n");
+    std::fs::write(&path, bytes).unwrap();
+    let assert = lossy_cmd(&root)
+        .arg("--crontab-user")
+        .arg(format!("alice={}", path.display()))
+        .assert()
+        .code(3);
+    let text = combined_output(assert.get_output());
+    assert_utf8_warning(&text, &path.display().to_string(), 2, 13);
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with("alice: /usr/local/bin/backup.sh (")),
+        "{text}"
+    );
     std::fs::remove_dir_all(&root).ok();
 }
 
@@ -612,8 +658,7 @@ fn timer_unit_with_a_non_utf8_byte_is_a_warning_not_exit_two() {
         .unwrap();
     assert_ne!(output.status.code(), Some(2), "{output:?}");
     let text = combined_output(&output);
-    assert!(text.contains("backup.timer"), "{text}");
-    assert!(text.contains("invalid UTF-8"), "{text}");
+    assert_utf8_warning(&text, &path.display().to_string(), 2, 22);
     std::fs::remove_dir_all(&root).ok();
 }
 
