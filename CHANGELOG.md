@@ -11,6 +11,10 @@ version stays 0.1.0.
 
 ### Fixed
 
+- A non-UTF-8 byte in an explicitly named crontab or `.timer` file
+  (or on stdin) failed the whole run with exit 2. It is now replaced
+  and reported as a warning naming the file, like a syslog's; a
+  missing file or a directory is still exit 2.
 - The crontab DST rule only treated an hour field of exactly `*` as a
   wildcard, so `0 */2 * * *` ran once in the repeated autumn hour while
   `0 */1 * * *` ran twice, and `*/15 2 * * *` was caught up after the

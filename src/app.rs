@@ -53,16 +53,30 @@ fn resolve_timestamp(value: &str, now: Timestamp) -> Result<Timestamp, String> {
         .map_err(|e| format!("'{value}' is out of range: {e}"))
 }
 
-fn read_text(path: &InputPath) -> Result<String, String> {
-    match path {
+/// Read a crontab or timer unit as text. A non-UTF-8 byte is replaced and
+/// noted as a warning, like a syslog's, so one bad byte does not fail the
+/// whole run. A missing or unreadable file is still an error.
+fn read_text(path: &InputPath, warnings: &mut Vec<String>) -> Result<String, String> {
+    let bytes = match path {
         InputPath::Stdin => {
-            let mut buf = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
                 .map_err(|e| format!("cannot read <stdin>: {e}"))?;
-            Ok(buf)
+            buf
         }
         InputPath::File(p) => {
-            std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {e}", p.display()))
+            std::fs::read(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?
+        }
+    };
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(text),
+        Err(e) => {
+            warnings.push(format!(
+                "{}: invalid UTF-8 at byte {}; replaced so the rest of the file can be read",
+                path.label(),
+                e.utf8_error().valid_up_to()
+            ));
+            Ok(String::from_utf8_lossy(e.as_bytes()).into_owned())
         }
     }
 }
@@ -358,14 +372,14 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     let mut coverage = LogCoverage::default();
 
     for path in &cli.crontabs {
-        let content = read_text(path)?;
+        let content = read_text(path, &mut c.warnings)?;
         let label = path.label();
         let parsed = crontab::parse_system_crontab(&content, &label);
         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
     }
 
     for (user, path) in &cli.crontab_users {
-        let content = read_text(path)?;
+        let content = read_text(path, &mut c.warnings)?;
         let label = path.label();
         let parsed = crontab::parse_user_crontab(&content, &label, Some(user));
         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
@@ -452,7 +466,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     }
 
     for path in &cli.timer_units {
-        let content = read_text(path)?;
+        let content = read_text(path, &mut c.warnings)?;
         let label = path.label();
         let timer = systemd::parse_timer_unit(&content, &label);
         c.warnings.extend(timer.warnings.clone());
