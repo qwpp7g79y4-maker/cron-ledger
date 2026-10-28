@@ -7,10 +7,11 @@ use std::collections::BTreeSet;
 ///
 /// `Star` means "every legal value, unrestricted". `Values` containing
 /// every legal value (e.g. from `1-31`) is kept distinct from it purely
-/// for display (`describe_field`) and for the wildcard-hour DST check in
-/// [`crate::schedule::expand`]; the day-of-month/day-of-week OR/AND rule
-/// does *not* use this distinction (see [`Schedule::dom_star`]/
-/// [`Schedule::dow_star`] and [`matches_day`] instead).
+/// for display (`describe_field`); neither the wildcard DST rule in
+/// [`crate::schedule::expand`] nor the day-of-month/day-of-week OR/AND
+/// rule uses this distinction (see [`Schedule::minute_star`]/
+/// [`Schedule::hour_star`] and [`Schedule::dom_star`]/
+/// [`Schedule::dow_star`] instead).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Field {
     Star,
@@ -41,6 +42,15 @@ pub struct Schedule {
     pub dom_star: bool,
     /// Same as `dom_star`, for the day-of-week field.
     pub dow_star: bool,
+    /// Whether the raw minute field's first character was `*` (cronie's
+    /// `MIN_STAR`), e.g. true for `*` and `*/15`. Together with
+    /// `hour_star` this makes the job a wildcard job for DST in
+    /// [`crate::schedule::expand`]. Not part of the JSON output.
+    #[serde(skip)]
+    pub minute_star: bool,
+    /// Same as `minute_star`, for the hour field (cronie's `HR_STAR`).
+    #[serde(skip)]
+    pub hour_star: bool,
 }
 
 /// `@reboot` has no computable schedule of expected run times; every other
@@ -164,6 +174,8 @@ mod tests {
             dow: values(&[1, 5]),
             dom_star: true,
             dow_star: false,
+            minute_star: false,
+            hour_star: true,
         };
         assert_eq!(describe_schedule(&schedule), "0,15,30,45 * * * 1,5");
     }

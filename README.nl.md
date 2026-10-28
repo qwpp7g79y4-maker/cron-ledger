@@ -4,7 +4,7 @@
 
 Een gratis, open-source, alleen-lezen opdrachtregelprogramma in Rust. Het leest crontabs en systemd-timers, berekent wanneer elke job in een tijdvenster *had moeten* draaien, legt dat naast syslog of de journal, en meldt **OK**, **LATE**, **MISSED** of **NO_TRACE**. Het draait lokaal, maakt geen netwerkverbinding en schrijft niets.
 
-Versie **0.1.0**. Licentie: `MIT OR Apache-2.0`.
+Versie **0.1.1**. Licentie: `MIT OR Apache-2.0`.
 
 De tekstuitvoer is Engels, dezelfde taal als `--help` en de statuswoorden (`expected`, `found`, `last run`, `Summary`, `Log coverage`, `Window`, `Tolerance`, `Warnings`, `… and N more`).
 

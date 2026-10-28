@@ -53,16 +53,32 @@ fn resolve_timestamp(value: &str, now: Timestamp) -> Result<Timestamp, String> {
         .map_err(|e| format!("'{value}' is out of range: {e}"))
 }
 
-fn read_text(path: &InputPath) -> Result<String, String> {
-    match path {
+/// Read a crontab or timer unit as text. A non-UTF-8 byte is replaced and
+/// noted as a warning, like a syslog's, so one bad byte does not fail the
+/// whole run. A missing or unreadable file is still an error. The warning
+/// names only the first invalid byte, by 1-based line and 0-based byte offset.
+fn read_text(path: &InputPath, warnings: &mut Vec<String>) -> Result<String, String> {
+    let bytes = match path {
         InputPath::Stdin => {
-            let mut buf = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
                 .map_err(|e| format!("cannot read <stdin>: {e}"))?;
-            Ok(buf)
+            buf
         }
         InputPath::File(p) => {
-            std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {e}", p.display()))
+            std::fs::read(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?
+        }
+    };
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(text),
+        Err(e) => {
+            let at = e.utf8_error().valid_up_to();
+            let line = 1 + e.as_bytes()[..at].iter().filter(|&&b| b == b'\n').count();
+            warnings.push(format!(
+                "{}:{line}: invalid UTF-8 at byte {at}; replaced so the rest of the file can be read",
+                path.label(),
+            ));
+            Ok(String::from_utf8_lossy(e.as_bytes()).into_owned())
         }
     }
 }
@@ -358,14 +374,14 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     let mut coverage = LogCoverage::default();
 
     for path in &cli.crontabs {
-        let content = read_text(path)?;
+        let content = read_text(path, &mut c.warnings)?;
         let label = path.label();
         let parsed = crontab::parse_system_crontab(&content, &label);
         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
     }
 
     for (user, path) in &cli.crontab_users {
-        let content = read_text(path)?;
+        let content = read_text(path, &mut c.warnings)?;
         let label = path.label();
         let parsed = crontab::parse_user_crontab(&content, &label, Some(user));
         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
@@ -452,7 +468,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     }
 
     for path in &cli.timer_units {
-        let content = read_text(path)?;
+        let content = read_text(path, &mut c.warnings)?;
         let label = path.label();
         let timer = systemd::parse_timer_unit(&content, &label);
         c.warnings.extend(timer.warnings.clone());
@@ -1058,6 +1074,44 @@ mod tests {
         assert!(
             !warnings.contains("never"),
             "29 February must not be flagged as never running: {warnings}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unknown_timezone_name_does_not_also_warn_that_the_schedule_never_runs() {
+        // Regression: an unresolvable timezone name used to parse `Ok`,
+        // so the end-of-loop "can never run" check in app.rs could not
+        // tell it apart from a genuinely impossible date and added a
+        // second, misleading warning on top of the real "unknown
+        // timezone" one. See breaktest-cronledger-0008.
+        let dir =
+            std::env::temp_dir().join(format!("cron-ledger-app-bad-tz-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let timer_path = dir.join("d.timer");
+        std::fs::write(
+            &timer_path,
+            "[Timer]\nOnCalendar=*-*-* 12:00:00 Mars/Nonexistent\nUnit=d.service\n",
+        )
+        .unwrap();
+
+        let cli = Cli {
+            since: "2026-10-20T00:00:00Z".to_string(),
+            until: Some("2026-10-21T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            timer_units: vec![InputPath::File(timer_path)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(
+            warnings.contains("unknown timezone"),
+            "expected the real diagnosis, got: {warnings}"
+        );
+        assert!(
+            !warnings.contains("can never run"),
+            "unknown timezone should not also claim the schedule can never run, got: {warnings}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

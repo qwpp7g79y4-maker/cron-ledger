@@ -532,3 +532,148 @@ NotAMonth 99 99:99:99 web1 CRON[4]: (root) CMD (/usr/local/bin/backup.sh)\n\xff\
     assert_no_dutch_report_labels(&stdout);
     std::fs::remove_dir_all(&root).ok();
 }
+
+/// A crontab or timer unit with a non-UTF-8 byte is read lossily: a
+/// warning names the file, line and byte, and the valid lines still count.
+/// The bad byte is the 14th byte (offset 13) and sits on line 2; the job
+/// is on line 3.
+fn bad_utf8_crontab() -> Vec<u8> {
+    let mut bytes = b"# daily\n# caf".to_vec();
+    bytes.push(0xe9);
+    bytes.extend(b"\n0 3 * * * root /usr/local/bin/backup.sh\n");
+    bytes
+}
+
+/// The warning must be exactly this line, not a substring of other output.
+fn assert_utf8_warning(text: &str, label: &str, line: usize, byte: usize) {
+    let want = format!(
+        "  - {label}:{line}: invalid UTF-8 at byte {byte}; replaced so the rest of the file can be read"
+    );
+    assert!(
+        text.lines().any(|l| l == want),
+        "missing {want:?} in:\n{text}"
+    );
+}
+
+/// The job itself, not the Summary line, must be reported OK.
+fn assert_backup_job_ok(text: &str) {
+    let lines: Vec<&str> = text.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| l.starts_with("root: /usr/local/bin/backup.sh ("))
+        .unwrap_or_else(|| panic!("no backup.sh job line in:\n{text}"));
+    assert!(lines[at].contains(":3)"), "{text}");
+    assert!(lines[at + 2].ends_with("(OK)"), "{text}");
+}
+
+fn lossy_cmd(root: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("cron-ledger").unwrap();
+    cmd.arg("--system-root")
+        .arg(root)
+        .arg("--syslog")
+        .arg(fixture("ok").join("syslog"))
+        .arg("--since")
+        .arg("2026-10-20T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-21T00:00:00Z");
+    cmd
+}
+
+fn combined_output(output: &std::process::Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+#[test]
+fn crontab_file_with_a_non_utf8_byte_is_a_warning_not_exit_two() {
+    let root = empty_root();
+    let path = root.join("bin.dat");
+    std::fs::write(&path, bad_utf8_crontab()).unwrap();
+    let assert = lossy_cmd(&root)
+        .arg("--crontab")
+        .arg(&path)
+        .assert()
+        .code(0);
+    let text = combined_output(assert.get_output());
+    assert_utf8_warning(&text, &path.display().to_string(), 2, 13);
+    assert_backup_job_ok(&text);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn crontab_on_stdin_with_a_non_utf8_byte_is_a_warning_not_exit_two() {
+    let root = empty_root();
+    let assert = lossy_cmd(&root)
+        .arg("--crontab")
+        .arg("-")
+        .write_stdin(bad_utf8_crontab())
+        .assert()
+        .code(0);
+    let text = combined_output(assert.get_output());
+    assert_utf8_warning(&text, "<stdin>", 2, 13);
+    assert_backup_job_ok(&text);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn crontab_user_with_a_non_utf8_byte_is_a_warning_not_exit_two() {
+    let root = empty_root();
+    let path = root.join("alice.tab");
+    // A user crontab has no user column; the job is on line 3. The fixture
+    // syslog has no run for alice, so the job is NO_TRACE (exit 3).
+    let mut bytes = b"# daily\n# caf".to_vec();
+    bytes.push(0xe9);
+    bytes.extend(b"\n0 3 * * * /usr/local/bin/backup.sh\n");
+    std::fs::write(&path, bytes).unwrap();
+    let assert = lossy_cmd(&root)
+        .arg("--crontab-user")
+        .arg(format!("alice={}", path.display()))
+        .assert()
+        .code(3);
+    let text = combined_output(assert.get_output());
+    assert_utf8_warning(&text, &path.display().to_string(), 2, 13);
+    assert!(
+        text.lines()
+            .any(|l| l.starts_with("alice: /usr/local/bin/backup.sh (")),
+        "{text}"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn timer_unit_with_a_non_utf8_byte_is_a_warning_not_exit_two() {
+    let root = empty_root();
+    let path = root.join("backup.timer");
+    let mut bytes = b"[Unit]\nDescription=caf".to_vec();
+    bytes.push(0xe9);
+    bytes.extend(b"\n[Timer]\nOnCalendar=*-*-* 03:00:00\n");
+    std::fs::write(&path, bytes).unwrap();
+    let output = lossy_cmd(&root)
+        .arg("--timer-unit")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert_ne!(output.status.code(), Some(2), "{output:?}");
+    let text = combined_output(&output);
+    assert_utf8_warning(&text, &path.display().to_string(), 2, 22);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn missing_or_directory_crontab_is_still_exit_two() {
+    let root = empty_root();
+    lossy_cmd(&root)
+        .arg("--crontab")
+        .arg(root.join("does-not-exist"))
+        .assert()
+        .code(2);
+    lossy_cmd(&root)
+        .arg("--crontab")
+        .arg(&root)
+        .assert()
+        .code(2);
+    std::fs::remove_dir_all(&root).ok();
+}
