@@ -8,7 +8,7 @@ that up against syslog or the journal, and reports **OK**, **LATE**,
 **MISSED**, or **NO_TRACE**. It runs locally, makes no network
 connections, and writes nothing.
 
-Version **0.1.0**. License: `MIT OR Apache-2.0`.
+Version **0.1.1**. License: `MIT OR Apache-2.0`.
 
 ## Installation
 
