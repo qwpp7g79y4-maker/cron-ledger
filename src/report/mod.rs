@@ -72,6 +72,22 @@ pub fn use_color(no_color_set: bool, is_tty: bool) -> bool {
     is_tty && !no_color_set
 }
 
+/// Make a message safe to write to a terminal on stderr. Control
+/// characters (ESC, BEL, ...) become a visible `\u{...}` form like the
+/// text report's; newlines and tabs stay, since error messages and the
+/// usage text use them for layout.
+pub fn neutralize_controls_keep_newlines(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_control() && c != '\n' && c != '\t' {
+            out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// How many of a job's earliest `MISSED` times the report shows
 /// (the first 5 missed times).
 const MAX_MISSED_SHOWN: usize = 5;
@@ -158,6 +174,14 @@ mod tests {
     use super::*;
     use crate::ledger::{JobLedgerEntry, RunOutcome};
     use crate::log::ExitStatus;
+
+    #[test]
+    fn neutralize_keeps_newlines_and_escapes_esc() {
+        assert_eq!(
+            neutralize_controls_keep_newlines("a\x1b\n  - b\x07"),
+            "a\\u{1b}\n  - b\\u{7}"
+        );
+    }
 
     fn entry(outcome: JobOutcome) -> JobLedgerEntry {
         JobLedgerEntry {

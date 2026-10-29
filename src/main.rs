@@ -16,17 +16,32 @@ fn report_write_error(err: io::Error) -> ! {
     std::process::exit(2);
 }
 
+/// Write an error message to stderr with control characters made
+/// visible, so a path with an escape sequence cannot drive the terminal.
+fn fail(message: &str) -> ! {
+    let _ = writeln!(
+        io::stderr(),
+        "cron-ledger: {}",
+        report::neutralize_controls_keep_newlines(message)
+    );
+    std::process::exit(2);
+}
+
 fn main() {
-    let raw_args: Vec<String> = std::env::args_os()
-        .skip(1)
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
+    let mut raw_args: Vec<String> = Vec::new();
+    for (i, arg) in std::env::args_os().skip(1).enumerate() {
+        match arg.into_string() {
+            Ok(a) => raw_args.push(a),
+            Err(bad) => fail(&format!(
+                "argument {} is not valid UTF-8 ({}); cron-ledger needs UTF-8 paths and arguments",
+                i + 1,
+                bad.to_string_lossy()
+            )),
+        }
+    }
     let parsed = match cli::parse(&raw_args) {
         Ok(c) => c,
-        Err(e) => {
-            let _ = writeln!(io::stderr(), "cron-ledger: {e}\n\n{}", cli::usage());
-            std::process::exit(2);
-        }
+        Err(e) => fail(&format!("{e}\n\n{}", cli::usage())),
     };
 
     if parsed.help {
@@ -39,10 +54,7 @@ fn main() {
     let now = jiff::Timestamp::now();
     let audit = match app::build(&parsed, now) {
         Ok(a) => a,
-        Err(e) => {
-            let _ = writeln!(io::stderr(), "cron-ledger: {e}");
-            std::process::exit(2);
-        }
+        Err(e) => fail(&e),
     };
 
     let ctx = report::ReportContext {
