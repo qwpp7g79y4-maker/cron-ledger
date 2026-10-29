@@ -205,6 +205,14 @@ mod nul_tests {
     }
 
     #[test]
+    fn nul_share_boundary_is_one_in_four_for_a_lossy_log() {
+        // One NUL byte in four is refused; one in eight is a skipped line.
+        assert!(decode_text(b"abc\0".to_vec(), true).is_err());
+        let got = decode_text(b"abcde\0fg".to_vec(), true).unwrap();
+        assert_eq!(got.nul_lines_skipped, 1);
+    }
+
+    #[test]
     fn strict_nul_is_still_refused() {
         assert!(decode_text(b"one\ntw\0o\n".to_vec(), false).is_err());
     }
