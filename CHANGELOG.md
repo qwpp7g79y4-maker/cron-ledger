@@ -14,8 +14,14 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A named `--crontab`, `--crontab-user` or `--timer-unit` that yields no job
   (empty file, empty stdin, only invalid lines, a timer with no trigger) is
   now exit 2, and so is a `--system-root` that is not a directory.
-- A `--system-root` scan that reads no crontab file (empty root, or every
-  file UTF-16 or NUL) is now exit 2 with the reasons on stderr.
+- A `--system-root` scan that found crontab files and could read none of
+  them (every file UTF-16 or NUL, or an unreadable directory) is now exit 2
+  with the reasons on stderr. A root with no crontab files stays exit 0, with a
+  `no crontab file found` warning.
+- A timer unit whose `OnCalendar=` values are all invalid is now exit 2, and
+  `OnCalendar=` with no value resets the list as it does in systemd.
+- A non-UTF-8 argument is refused with exit 2 and a message saying so, and
+  control characters in a path are escaped in error messages on stderr.
 - A NUL byte in a syslog, journal or `.gz` log skips only its own line
   (with a warning); a log that is a quarter NUL or more is still refused.
 - A non-UTF-8 argument or a closed stderr no longer panics (exit 101).
