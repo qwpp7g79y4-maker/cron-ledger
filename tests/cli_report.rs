@@ -915,6 +915,12 @@ fn nul_in_the_middle_of_a_gz_syslog_skips_only_that_line() {
     let (assert, stdout) = nul_log_run(&root, &log);
     assert.code(0);
     assert!(stdout.contains("2 OK"), "{stdout}");
+    // The warning is what tells the gz path from the lossy read: without
+    // the NUL handling the line is kept (lossily) and nothing is reported.
+    assert!(
+        stdout.contains("1 line(s) with a NUL byte skipped"),
+        "{stdout}"
+    );
     std::fs::remove_dir_all(&root).ok();
 }
 
