@@ -59,11 +59,12 @@ fn main() {
     let audit = match app::build(&parsed, now) {
         Ok(a) => a,
         Err(e) => {
-            let details: String = e
-                .details
-                .iter()
-                .map(|d| format!("  - {}\n", report::neutralize_controls(d)))
-                .collect();
+            let details = e.details.iter().fold(String::new(), |mut acc, d| {
+                acc.push_str("  - ");
+                acc.push_str(&report::neutralize_controls(d));
+                acc.push('\n');
+                acc
+            });
             fail_with(&e.message, &details)
         }
     };
