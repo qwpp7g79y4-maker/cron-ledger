@@ -651,13 +651,121 @@ fn non_utf8_argument_is_a_usage_error_not_a_panic() {
     assert!(h1_stderr(&assert).contains("ok.cron"));
 }
 
+#[cfg(unix)]
 #[test]
-fn empty_system_root_scan_is_a_usage_error_exit_two() {
+fn existing_non_utf8_file_name_is_refused_as_such() {
+    use std::os::unix::ffi::OsStrExt;
     let root = empty_root();
-    let assert = h1_cmd(&root).assert().code(2);
+    let name = std::ffi::OsStr::from_bytes(b"ok.cron\xff");
+    let path = root.join(name);
+    std::fs::write(&path, "0 3 * * * root /bin/backup.sh\n").unwrap();
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .arg("--crontab")
+        .arg(&path)
+        .args(["--since", "1d"])
+        .assert()
+        .code(2);
     let stderr = h1_stderr(&assert);
-    assert!(stderr.contains("no jobs found"), "{stderr}");
-    assert!(stderr.contains("--system-root"), "{stderr}");
+    assert!(stderr.contains("not valid UTF-8"), "{stderr}");
+    assert!(!stderr.contains("No such file"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn control_characters_in_a_path_are_escaped_in_error_messages() {
+    let root = empty_root();
+    let crontab = root.join("e\x1b[31m\x1b]0;pwn\x07.cron");
+    std::fs::write(&crontab, "").unwrap();
+    let assert = h1_cmd(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .assert()
+        .code(2);
+    let stderr = h1_stderr(&assert);
+    assert!(
+        stderr.contains("e\\u{1b}[31m\\u{1b}]0;pwn\\u{7}.cron: no jobs found"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains('\x1b') && !stderr.contains('\x07'),
+        "{stderr:?}"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+fn timer_run(root: &Path, body: &str) -> assert_cmd::assert::Assert {
+    let timer = root.join("g.timer");
+    std::fs::write(&timer, body).unwrap();
+    let log = root.join("other.log");
+    std::fs::write(&log, H1_OTHER_LOG).unwrap();
+    h1_cmd(root)
+        .arg("--timer-unit")
+        .arg(&timer)
+        .arg("--syslog")
+        .arg(&log)
+        .assert()
+}
+
+#[test]
+fn timer_with_only_an_invalid_oncalendar_is_a_usage_error_exit_two() {
+    let root = empty_root();
+    let assert = timer_run(&root, "[Timer]\nOnCalendar=garbage\n").code(2);
+    let stderr = h1_stderr(&assert);
+    assert!(stderr.contains("g.timer: no jobs found"), "{stderr}");
+    assert!(stderr.contains("garbage"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn timer_with_an_empty_oncalendar_is_a_usage_error_exit_two() {
+    let root = empty_root();
+    timer_run(&root, "[Timer]\nOnCalendar=\n").code(2);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn timer_with_one_valid_and_one_invalid_oncalendar_still_audits() {
+    let root = empty_root();
+    let assert = timer_run(
+        &root,
+        "[Timer]\nOnCalendar=garbage\nOnCalendar=*-*-* 03:00:00\n",
+    )
+    .code(3);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(stdout.contains("garbage"), "{stdout}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn empty_report_with_no_jobs_and_empty_syslog_is_in_english() {
+    let root = empty_root();
+    std::fs::create_dir_all(root.join("etc")).unwrap();
+    std::fs::write(root.join("etc/crontab"), "# no jobs\n").unwrap();
+    let syslog = root.join("empty.log");
+    std::fs::write(&syslog, "").unwrap();
+    let assert = h1_cmd(&root).arg("--syslog").arg(&syslog).assert().code(0);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(stdout.starts_with("(no jobs found)\n"), "{stdout}");
+    assert!(stdout.contains("Log coverage: no logs\n"), "{stdout}");
+    assert!(stdout.contains("Window: "), "{stdout}");
+    assert!(stdout.contains("Tolerance: 300s\n"), "{stdout}");
+    assert!(
+        stdout.contains("Warnings:\n  - no log events found in the window:"),
+        "{stdout}"
+    );
+    assert_no_dutch_report_labels(&stdout);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn empty_system_root_scan_warns_and_exits_zero() {
+    let root = empty_root();
+    let assert = h1_cmd(&root).assert().code(0);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(stdout.contains("(no jobs found)"), "{stdout}");
+    assert!(stdout.contains("no crontab file found"), "{stdout}");
     std::fs::remove_dir_all(&root).ok();
 }
 
@@ -676,6 +784,21 @@ fn system_root_scan_with_only_unreadable_files_is_a_usage_error_exit_two() {
     assert!(stderr.contains("no jobs found"), "{stderr}");
     assert!(stderr.contains("etc/crontab"), "{stderr}");
     assert!(stderr.contains("etc/cron.d/u16"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn system_root_with_one_unreadable_and_one_readable_file_still_audits() {
+    let root = empty_root();
+    std::fs::create_dir_all(root.join("etc/cron.d")).unwrap();
+    std::fs::write(root.join("etc/crontab"), b"\0\0").unwrap();
+    std::fs::write(root.join("etc/cron.d/ok"), "0 12 * * * root /bin/other\n").unwrap();
+    let log = root.join("other.log");
+    std::fs::write(&log, H1_OTHER_LOG).unwrap();
+    let assert = h1_cmd(&root).arg("--syslog").arg(&log).assert().code(0);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(stdout.contains("etc/crontab"), "{stdout}");
+    assert!(stdout.contains("expected: 1"), "{stdout}");
     std::fs::remove_dir_all(&root).ok();
 }
 
