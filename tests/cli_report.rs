@@ -831,6 +831,13 @@ fn empty_report_with_no_jobs_and_empty_syslog_is_in_english() {
     let assert = h1_cmd(&root).arg("--syslog").arg(&syslog).assert().code(0);
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
     assert!(stdout.starts_with("(no jobs found)\n"), "{stdout}");
+    assert!(!stdout.contains("expected:"), "{stdout}");
+    assert!(
+        stdout.contains(
+            "Summary: 0 OK, 0 LATE, 0 LATE (caught up), 0 MISSED, 0 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER"
+        ),
+        "{stdout}"
+    );
     assert!(stdout.contains("Log coverage: no logs\n"), "{stdout}");
     assert!(stdout.contains("Window: "), "{stdout}");
     assert!(stdout.contains("Tolerance: 300s\n"), "{stdout}");
