@@ -173,6 +173,9 @@ pub fn parse_timer_unit(content: &str, file: &str) -> TimerUnit {
         }
 
         match key {
+            // systemd reads an empty assignment as "forget the earlier
+            // values of this list".
+            "OnCalendar" if value.is_empty() => unit.on_calendar.clear(),
             "OnCalendar" => unit.on_calendar.push(value.to_string()),
             "Persistent" => match parse_bool(value) {
                 Some(b) => unit.persistent = b,
@@ -268,6 +271,16 @@ pub fn evaluate_missed_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_oncalendar_resets_the_list() {
+        let unit = parse_timer_unit(
+            "[Timer]\nOnCalendar=a\nOnCalendar=\nOnCalendar=*-*-* 03:00:00\n",
+            "t.timer",
+        );
+        assert_eq!(unit.on_calendar, vec!["*-*-* 03:00:00".to_string()]);
+        assert_eq!(unit.warnings, Vec::<String>::new());
+    }
 
     #[test]
     fn parses_basic_timer() {
