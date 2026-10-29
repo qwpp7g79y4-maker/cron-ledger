@@ -54,17 +54,28 @@ fn resolve_timestamp(value: &str, now: Timestamp) -> Result<Timestamp, String> {
 }
 
 fn read_text(path: &InputPath) -> Result<String, String> {
-    match path {
+    let (bytes, name) = match path {
         InputPath::Stdin => {
-            let mut buf = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
                 .map_err(|e| format!("cannot read <stdin>: {e}"))?;
-            Ok(buf)
+            (buf, "<stdin>".to_string())
         }
-        InputPath::File(p) => {
-            std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {e}", p.display()))
-        }
-    }
+        InputPath::File(p) => (
+            std::fs::read(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?,
+            p.display().to_string(),
+        ),
+    };
+    Ok(log::decode_text(bytes, false)
+        .map_err(|e| format!("cannot read {name}: {e}"))?
+        .text)
+}
+
+/// Read a file found by the `--system-root` scan, with the same decoding as
+/// a named crontab.
+fn read_scanned(path: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    Ok(log::decode_text(bytes, false)?.text)
 }
 
 fn read_log_text(path: &InputPath) -> Result<log::LogText, String> {
@@ -73,7 +84,7 @@ fn read_log_text(path: &InputPath) -> Result<log::LogText, String> {
             let mut buf = Vec::new();
             std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
                 .map_err(|e| format!("cannot read <stdin>: {e}"))?;
-            Ok(log::decode_log_bytes(buf))
+            log::decode_text(buf, true).map_err(|e| format!("cannot read <stdin>: {e}"))
         }
         InputPath::File(p) => {
             log::read_log_source(p).map_err(|e| format!("cannot read {}: {e}", p.display()))
@@ -87,6 +98,14 @@ fn note_invalid_utf8(warnings: &mut Vec<String>, label: &str, text: &log::LogTex
             "{label}: invalid UTF-8 at byte {at}; replaced so the rest of the log can be read"
         ));
     }
+}
+
+fn rejected_lines(result: &crontab::ParseResult) -> Vec<String> {
+    result
+        .warnings
+        .iter()
+        .map(|w| format!("{}:{}: {}", w.file, w.line, w.message))
+        .collect()
 }
 
 /// Most expected runs one audit will hold. Past this the ledger is about
@@ -189,6 +208,30 @@ impl Collector {
             next_after_window,
         });
         Ok(())
+    }
+
+    /// A named job source (`--crontab`, `--crontab-user`, `--timer-unit`)
+    /// that adds no job is a usage error: a typo, a wrong file or an
+    /// unreadable one would otherwise report "all OK" for runs never
+    /// checked. The first few rejected lines say why.
+    fn require_jobs(
+        &self,
+        label: &str,
+        jobs_before: usize,
+        rejected: &[String],
+    ) -> Result<(), String> {
+        if self.jobs.len() > jobs_before {
+            return Ok(());
+        }
+        let mut msg = format!("{label}: no jobs found");
+        if !rejected.is_empty() {
+            msg.push_str(&format!(
+                " ({} line(s) rejected, first: {})",
+                rejected.len(),
+                rejected[0]
+            ));
+        }
+        Err(msg)
     }
 
     fn add_parse_result(
@@ -361,14 +404,20 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         let content = read_text(path)?;
         let label = path.label();
         let parsed = crontab::parse_system_crontab(&content, &label);
+        let before = c.jobs.len();
+        let rejected = rejected_lines(&parsed);
         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
+        c.require_jobs(&label, before, &rejected)?;
     }
 
     for (user, path) in &cli.crontab_users {
         let content = read_text(path)?;
         let label = path.label();
         let parsed = crontab::parse_user_crontab(&content, &label, Some(user));
+        let before = c.jobs.len();
+        let rejected = rejected_lines(&parsed);
         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
+        c.require_jobs(&label, before, &rejected)?;
     }
 
     // --system-root is the fallback source. A named --crontab,
@@ -381,9 +430,12 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         !cli.crontabs.is_empty() || !cli.crontab_users.is_empty() || !cli.timer_units.is_empty();
     if !named_job_source {
         let root = &cli.system_root;
+        if !root.is_dir() {
+            return Err(format!("--system-root {}: not a directory", root.display()));
+        }
         let etc_crontab = root.join("etc/crontab");
         if etc_crontab.is_file() {
-            match std::fs::read_to_string(&etc_crontab) {
+            match read_scanned(&etc_crontab) {
                 Ok(content) => {
                     let label = etc_crontab.display().to_string();
                     let parsed = crontab::parse_system_crontab(&content, &label);
@@ -416,7 +468,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                     }
                     CronDFileName::Accepted => {}
                 }
-                match std::fs::read_to_string(&file) {
+                match read_scanned(&file) {
                     Ok(content) => {
                         let label = file.display().to_string();
                         let parsed = crontab::parse_system_crontab(&content, &label);
@@ -439,7 +491,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string();
-                match std::fs::read_to_string(&file) {
+                match read_scanned(&file) {
                     Ok(content) => {
                         let label = file.display().to_string();
                         let parsed = crontab::parse_user_crontab(&content, &label, Some(&user));
@@ -455,6 +507,13 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         let content = read_text(path)?;
         let label = path.label();
         let timer = systemd::parse_timer_unit(&content, &label);
+        if timer.on_calendar.is_empty() && timer.unsupported_triggers.is_empty() {
+            let why = timer.warnings.first().map(|w| format!(", first: {w}"));
+            return Err(format!(
+                "{label}: no jobs found (no OnCalendar= or other trigger in a [Timer] section{})",
+                why.unwrap_or_default()
+            ));
+        }
         c.warnings.extend(timer.warnings.clone());
 
         let unit_name = timer

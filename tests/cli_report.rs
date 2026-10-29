@@ -361,46 +361,6 @@ Tolerance: 300s
 }
 
 #[test]
-fn empty_crontab_and_empty_syslog_report_in_english() {
-    let root = empty_root();
-    let crontab = root.join("empty.crontab");
-    let syslog = root.join("empty.log");
-    std::fs::write(&crontab, "").unwrap();
-    std::fs::write(&syslog, "").unwrap();
-    let assert = Command::cargo_bin("cron-ledger")
-        .unwrap()
-        .arg("--system-root")
-        .arg(&root)
-        .arg("--crontab")
-        .arg(&crontab)
-        .arg("--syslog")
-        .arg(&syslog)
-        .arg("--since")
-        .arg("2026-10-20T00:00:00Z")
-        .arg("--until")
-        .arg("2026-10-21T00:00:00Z")
-        .arg("--tz")
-        .arg("UTC")
-        .assert()
-        .code(0);
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
-    assert!(stdout.starts_with("(no jobs found)\n"), "{stdout}");
-    assert!(!stdout.contains("expected:"), "{stdout}");
-    assert!(stdout.contains(
-        "Summary: 0 OK, 0 LATE, 0 LATE (caught up), 0 MISSED, 0 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER"
-    ));
-    assert!(stdout.contains("Log coverage: no logs\n"), "{stdout}");
-    assert!(stdout.contains("Window: "), "{stdout}");
-    assert!(stdout.contains("Tolerance: 300s\n"), "{stdout}");
-    assert!(
-        stdout.contains("Warnings:\n  - no log events found in the window:"),
-        "{stdout}"
-    );
-    assert_no_dutch_report_labels(&stdout);
-    std::fs::remove_dir_all(&root).ok();
-}
-
-#[test]
 fn too_many_broken_lines_truncate_the_english_report() {
     // One empty log warning plus 60 unparseable crontab lines is past the
     // 50-line text cap. The overflow line has to stay English.
@@ -411,6 +371,9 @@ fn too_many_broken_lines_truncate_the_english_report() {
     for i in 0..60 {
         body.push_str(&format!("not a valid cron line {i}\n"));
     }
+    // A named crontab with no job at all is a usage error, so one valid
+    // line follows the 60 broken ones (their line numbers stay 1..=60).
+    body.push_str("0 3 * * * root /bin/backup.sh\n");
     std::fs::write(&crontab, body).unwrap();
     std::fs::write(&syslog, "").unwrap();
     let assert = Command::cargo_bin("cron-ledger")
@@ -428,11 +391,10 @@ fn too_many_broken_lines_truncate_the_english_report() {
         .arg("--tz")
         .arg("UTC")
         .assert()
-        .code(0);
+        .code(3);
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
     let shown = format!("{}:49:", crontab.display());
     let hidden = format!("{}:50:", crontab.display());
-    assert!(stdout.starts_with("(no jobs found)\n"), "{stdout}");
     assert_eq!(stdout.matches("\n  - ").count(), 50, "{stdout}");
     assert!(
         stdout.contains("not enough schedule fields, or missing command"),
@@ -531,4 +493,159 @@ NotAMonth 99 99:99:99 web1 CRON[4]: (root) CMD (/usr/local/bin/backup.sh)\n\xff\
     assert!(!stdout.contains("… and "), "{stdout}");
     assert_no_dutch_report_labels(&stdout);
     std::fs::remove_dir_all(&root).ok();
+}
+
+const H1_WINDOW: [&str; 6] = [
+    "--since",
+    "2026-10-20T00:00:00Z",
+    "--until",
+    "2026-10-21T00:00:00Z",
+    "--tz",
+    "UTC",
+];
+
+const H1_OTHER_LOG: &str = "Oct 20 12:00:00 h CRON[1]: (root) CMD (/bin/other)\n";
+
+fn h1_cmd(root: &Path) -> Command {
+    let mut cmd = Command::cargo_bin("cron-ledger").unwrap();
+    cmd.arg("--system-root").arg(root).args(H1_WINDOW);
+    cmd
+}
+
+fn h1_stderr(assert: &assert_cmd::assert::Assert) -> String {
+    String::from_utf8_lossy(&assert.get_output().stderr).into_owned()
+}
+
+#[test]
+fn timer_unit_with_a_utf8_bom_keeps_its_timer_section() {
+    let root = empty_root();
+    let timer = root.join("bomt.timer");
+    let log = root.join("other.log");
+    std::fs::write(
+        &timer,
+        b"\xef\xbb\xbf[Timer]\nOnCalendar=*-*-* 03:00:00\nUnit=d.service\n",
+    )
+    .unwrap();
+    std::fs::write(&log, H1_OTHER_LOG).unwrap();
+    let assert = h1_cmd(&root)
+        .arg("--timer-unit")
+        .arg(&timer)
+        .arg("--syslog")
+        .arg(&log)
+        .assert()
+        .code(3);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(stdout.contains("expected: 1"), "{stdout}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn utf16_crontab_is_refused_with_exit_two() {
+    let root = empty_root();
+    let crontab = root.join("utf16.cron");
+    let mut bytes = vec![0xff, 0xfe];
+    for unit in "0 3 * * * root /bin/backup.sh\n".encode_utf16() {
+        bytes.extend(unit.to_le_bytes());
+    }
+    std::fs::write(&crontab, bytes).unwrap();
+    let assert = h1_cmd(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .assert()
+        .code(2);
+    let stderr = h1_stderr(&assert);
+    assert!(stderr.contains("utf16.cron"), "{stderr}");
+    assert!(stderr.contains("UTF-16"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn utf16_crontab_without_a_bom_is_refused_for_its_nul_bytes() {
+    let root = empty_root();
+    let crontab = root.join("nobom.cron");
+    let mut bytes = Vec::new();
+    for unit in "0 3 * * * root /bin/backup.sh\n".encode_utf16() {
+        bytes.extend(unit.to_le_bytes());
+    }
+    std::fs::write(&crontab, bytes).unwrap();
+    let assert = h1_cmd(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .assert()
+        .code(2);
+    assert!(h1_stderr(&assert).contains("NUL byte"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn nonexistent_system_root_is_a_usage_error_exit_two() {
+    let root = empty_root();
+    let log = root.join("other.log");
+    std::fs::write(&log, H1_OTHER_LOG).unwrap();
+    let missing = root.join("does-not-exist");
+    let assert = h1_cmd(&missing).arg("--syslog").arg(&log).assert().code(2);
+    let stderr = h1_stderr(&assert);
+    assert!(stderr.contains("--system-root"), "{stderr}");
+    assert!(stderr.contains("does-not-exist"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn crontab_with_only_invalid_lines_is_a_usage_error_exit_two() {
+    let root = empty_root();
+    let crontab = root.join("inv.cron");
+    let log = root.join("other.log");
+    std::fs::write(&crontab, "garbage line here\n").unwrap();
+    std::fs::write(&log, H1_OTHER_LOG).unwrap();
+    let assert = h1_cmd(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .arg("--syslog")
+        .arg(&log)
+        .assert()
+        .code(2);
+    let stderr = h1_stderr(&assert);
+    assert!(stderr.contains("inv.cron: no jobs found"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn empty_stdin_crontab_is_a_usage_error_exit_two() {
+    let root = empty_root();
+    let assert = h1_cmd(&root)
+        .arg("--crontab")
+        .arg("-")
+        .write_stdin("")
+        .assert()
+        .code(2);
+    let stderr = h1_stderr(&assert);
+    assert!(stderr.contains("<stdin>: no jobs found"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn empty_crontab_file_is_a_usage_error_exit_two() {
+    let root = empty_root();
+    let crontab = root.join("empty.crontab");
+    std::fs::write(&crontab, "").unwrap();
+    let assert = h1_cmd(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .assert()
+        .code(2);
+    assert!(h1_stderr(&assert).contains("empty.crontab: no jobs found"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn non_utf8_argument_is_a_usage_error_not_a_panic() {
+    use std::os::unix::ffi::OsStrExt;
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .arg("--crontab")
+        .arg(std::ffi::OsStr::from_bytes(b"ok.cron\xff"))
+        .args(["--since", "1d"])
+        .assert()
+        .code(2);
+    assert!(h1_stderr(&assert).contains("ok.cron"));
 }

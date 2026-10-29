@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file, in the
 style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Empty or unreadable input exited 0 ("all OK"). Every text input now goes
+  through one `decode_text`: a UTF-8 BOM is stripped (a BOM-prefixed timer
+  unit lost its `[Timer]` section), and a UTF-16/UTF-32 BOM or a NUL byte is
+  refused with exit 2 (a UTF-16 crontab gave 0 jobs and exit 0).
+- A named `--crontab`, `--crontab-user` or `--timer-unit` that yields no job
+  (empty file, empty stdin, only invalid lines, a timer with no trigger) is
+  now exit 2, and so is a `--system-root` that is not a directory.
+- A non-UTF-8 argument or a closed stderr no longer panics (exit 101).
+
 ## [0.1.0] - 2026-10-24
 
 First release. There is no earlier tag, so this lists every commit since

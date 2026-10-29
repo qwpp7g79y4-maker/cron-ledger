@@ -12,16 +12,19 @@ fn write_stdout(text: &str) -> io::Result<()> {
 }
 
 fn report_write_error(err: io::Error) -> ! {
-    eprintln!("cron-ledger: cannot write report: {err}");
+    let _ = writeln!(io::stderr(), "cron-ledger: cannot write report: {err}");
     std::process::exit(2);
 }
 
 fn main() {
-    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    let raw_args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     let parsed = match cli::parse(&raw_args) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("cron-ledger: {e}\n\n{}", cli::usage());
+            let _ = writeln!(io::stderr(), "cron-ledger: {e}\n\n{}", cli::usage());
             std::process::exit(2);
         }
     };
@@ -37,7 +40,7 @@ fn main() {
     let audit = match app::build(&parsed, now) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("cron-ledger: {e}");
+            let _ = writeln!(io::stderr(), "cron-ledger: {e}");
             std::process::exit(2);
         }
     };

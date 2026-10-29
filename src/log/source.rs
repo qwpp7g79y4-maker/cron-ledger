@@ -14,27 +14,54 @@ pub struct LogText {
     pub invalid_utf8_at: Option<usize>,
 }
 
-/// Decode log bytes. Invalid UTF-8 is replaced and reported. It does not
-/// fail the read: one bad byte must not discard the rest of the file.
-pub(crate) fn decode_log_bytes(bytes: Vec<u8>) -> LogText {
-    match String::from_utf8(bytes) {
-        Ok(text) => LogText {
-            text,
-            invalid_utf8_at: None,
-        },
-        Err(err) => {
-            let invalid_utf8_at = Some(err.utf8_error().valid_up_to());
-            LogText {
-                text: String::from_utf8_lossy(err.as_bytes()).into_owned(),
-                invalid_utf8_at,
-            }
-        }
+/// The one decoder for every text input (crontab, timer unit, syslog,
+/// journal). A UTF-16 or UTF-32 byte-order mark or any NUL byte means the
+/// file is not 8-bit text; reading it as UTF-8 would turn every line into
+/// garbage and report "no jobs" as success, so it is refused. A UTF-8 BOM
+/// is stripped. With `lossy` set, invalid UTF-8 is replaced and reported
+/// in [`LogText::invalid_utf8_at`] (one bad byte must not discard the rest
+/// of a log); without it, invalid UTF-8 is an error.
+pub(crate) fn decode_text(bytes: Vec<u8>, lossy: bool) -> Result<LogText, String> {
+    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        return Err(
+            "looks like UTF-16 or UTF-32 (byte-order mark); only UTF-8 is supported".into(),
+        );
     }
+    if bytes.starts_with(&[0x00, 0x00, 0xFE, 0xFF]) {
+        return Err("looks like UTF-32 (byte-order mark); only UTF-8 is supported".into());
+    }
+    if let Some(at) = bytes.iter().position(|&b| b == 0) {
+        return Err(format!(
+            "contains a NUL byte at byte {at}; not a UTF-8 text file"
+        ));
+    }
+    let (text, invalid_utf8_at) = match String::from_utf8(bytes) {
+        Ok(text) => (text, None),
+        Err(err) => {
+            let at = err.utf8_error().valid_up_to();
+            if !lossy {
+                return Err(format!("invalid UTF-8 at byte {at}"));
+            }
+            (
+                String::from_utf8_lossy(err.as_bytes()).into_owned(),
+                Some(at),
+            )
+        }
+    };
+    let text = match text.strip_prefix('\u{feff}') {
+        Some(rest) => rest.to_string(),
+        None => text,
+    };
+    Ok(LogText {
+        text,
+        invalid_utf8_at,
+    })
 }
 
 /// Read `path` as text, gunzipping it first if its extension is `gz`.
-/// Invalid UTF-8 is replaced; see [`decode_log_bytes`].
+/// Invalid UTF-8 is replaced; see [`decode_text`].
 pub fn read_log_source(path: &Path) -> std::io::Result<LogText> {
+    let invalid = |msg: String| std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
     let bytes = std::fs::read(path)?;
     if path.extension().and_then(|e| e.to_str()) == Some("gz") {
         // MultiGzDecoder, not GzDecoder: some log rotation appends a new
@@ -43,9 +70,9 @@ pub fn read_log_source(path: &Path) -> std::io::Result<LogText> {
         let mut decoder = flate2::read::MultiGzDecoder::new(&bytes[..]);
         let mut inflated = Vec::new();
         decoder.read_to_end(&mut inflated)?;
-        Ok(decode_log_bytes(inflated))
+        decode_text(inflated, true).map_err(invalid)
     } else {
-        Ok(decode_log_bytes(bytes))
+        decode_text(bytes, true).map_err(invalid)
     }
 }
 
