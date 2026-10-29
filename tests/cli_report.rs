@@ -695,6 +695,47 @@ fn control_characters_in_a_path_are_escaped_in_error_messages() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+#[cfg(unix)]
+#[test]
+fn newline_in_a_path_cannot_forge_a_second_stderr_line() {
+    let root = empty_root();
+    let crontab = root.join("nope\ncron-ledger: all 12 jobs OK.cron");
+    std::fs::write(&crontab, "").unwrap();
+    let assert = h1_cmd(&root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .assert()
+        .code(2);
+    let stderr = h1_stderr(&assert);
+    assert_eq!(stderr.lines().count(), 1, "{stderr:?}");
+    assert!(
+        stderr.contains("nope\\u{a}cron-ledger: all 12 jobs OK"),
+        "{stderr:?}"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn newline_in_a_scanned_file_name_cannot_forge_a_stderr_line() {
+    let root = empty_root();
+    let d = root.join("var/spool/cron/crontabs");
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("a\ncron-ledger: all 12 jobs OK"), b"\0\0").unwrap();
+    let assert = h1_cmd(&root).assert().code(2);
+    let stderr = h1_stderr(&assert);
+    let lines: Vec<&str> = stderr.lines().collect();
+    assert!(
+        lines[0].starts_with("cron-ledger: --system-root"),
+        "{stderr:?}"
+    );
+    assert!(lines.len() >= 2, "{stderr:?}");
+    for l in &lines[1..] {
+        assert!(l.starts_with("  - "), "forged line {l:?} in {stderr:?}");
+    }
+    std::fs::remove_dir_all(&root).ok();
+}
+
 fn timer_run(root: &Path, body: &str) -> assert_cmd::assert::Assert {
     let timer = root.join("g.timer");
     std::fs::write(&timer, body).unwrap();

@@ -16,15 +16,19 @@ fn report_write_error(err: io::Error) -> ! {
     std::process::exit(2);
 }
 
-/// Write an error message to stderr with control characters made
-/// visible, so a path with an escape sequence cannot drive the terminal.
-fn fail(message: &str) -> ! {
-    let _ = writeln!(
-        io::stderr(),
-        "cron-ledger: {}",
-        report::neutralize_controls_keep_newlines(message)
-    );
+/// Write an error to stderr as `cron-ledger: <message>`, followed by the
+/// layout lines `extra` (already built by us, e.g. the usage text). The
+/// message is untrusted (it can hold a path), so every control character,
+/// newlines included, is made visible: it cannot start a line of its own.
+fn fail_with(message: &str, extra: &str) -> ! {
+    let mut err = io::stderr();
+    let _ = writeln!(err, "cron-ledger: {}", report::neutralize_controls(message));
+    let _ = write!(err, "{extra}");
     std::process::exit(2);
+}
+
+fn fail(message: &str) -> ! {
+    fail_with(message, "")
 }
 
 fn main() {
@@ -41,7 +45,7 @@ fn main() {
     }
     let parsed = match cli::parse(&raw_args) {
         Ok(c) => c,
-        Err(e) => fail(&format!("{e}\n\n{}", cli::usage())),
+        Err(e) => fail_with(&e.to_string(), &format!("\n{}\n", cli::usage())),
     };
 
     if parsed.help {
@@ -54,7 +58,14 @@ fn main() {
     let now = jiff::Timestamp::now();
     let audit = match app::build(&parsed, now) {
         Ok(a) => a,
-        Err(e) => fail(&e),
+        Err(e) => {
+            let details: String = e
+                .details
+                .iter()
+                .map(|d| format!("  - {}\n", report::neutralize_controls(d)))
+                .collect();
+            fail_with(&e.message, &details)
+        }
     };
 
     let ctx = report::ReportContext {

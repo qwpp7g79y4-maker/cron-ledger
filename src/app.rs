@@ -371,9 +371,37 @@ fn collect_files(
     unread
 }
 
+/// Why [`build`] failed: one message plus optional detail lines. The
+/// caller prints the details on lines of their own, so a newline inside
+/// a path or a warning can never pass for a separate message.
+#[derive(Debug)]
+pub struct BuildError {
+    pub message: String,
+    pub details: Vec<String>,
+}
+
+impl From<String> for BuildError {
+    fn from(message: String) -> Self {
+        BuildError {
+            message,
+            details: Vec::new(),
+        }
+    }
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)?;
+        for d in &self.details {
+            write!(f, "\n  - {d}")?;
+        }
+        Ok(())
+    }
+}
+
 /// Build the ledger for `cli`, using `now` as "the current time" for a
 /// relative `--since`/`--until` and a defaulted `--until`.
-pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
+pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
     let tz = match &cli.tz {
         Some(name) => resolve_timezone(name)?,
         None => default_timezone(),
@@ -386,9 +414,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     // An equal bound is an empty window and still a normal audit. An
     // inverted one expands to nothing and would otherwise exit 0.
     if until < since {
-        return Err(format!(
-            "--until ({until}) is earlier than --since ({since})"
-        ));
+        return Err(format!("--until ({until}) is earlier than --since ({since})").into());
     }
     let tolerance = cli.tolerance;
 
@@ -437,7 +463,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     if !named_job_source {
         let root = &cli.system_root;
         if !root.is_dir() {
-            return Err(format!("--system-root {}: not a directory", root.display()));
+            return Err(format!("--system-root {}: not a directory", root.display()).into());
         }
         let mut scanned_files = 0usize;
         let mut scan_failed = 0usize;
@@ -530,14 +556,13 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                 root.display()
             ));
         } else if scanned_files == 0 {
-            let mut msg = format!(
-                "--system-root {}: no jobs found (no readable crontab file)",
-                root.display()
-            );
-            for w in &c.warnings {
-                msg.push_str(&format!("\n  - {w}"));
-            }
-            return Err(msg);
+            return Err(BuildError {
+                message: format!(
+                    "--system-root {}: no jobs found (no readable crontab file)",
+                    root.display()
+                ),
+                details: c.warnings.clone(),
+            });
         }
     }
 
@@ -550,7 +575,8 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             return Err(format!(
                 "{label}: no jobs found (no OnCalendar= or other trigger in a [Timer] section{})",
                 why.unwrap_or_default()
-            ));
+            )
+            .into());
         }
         c.warnings.extend(timer.warnings.clone());
 
@@ -648,7 +674,8 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                 return Err(format!(
                     "{label}: no jobs found (no valid OnCalendar=, first: {})",
                     first_calendar_error.unwrap_or_default()
-                ));
+                )
+                .into());
             }
             if any_calendar_parsed && all_times.is_empty() && !any_calendar_ever_elapses {
                 c.warnings.push(format!(
@@ -762,7 +789,9 @@ mod tests {
             crontabs: vec![InputPath::File(PathBuf::from("/nonexistent/crontab"))],
             ..Cli::default()
         };
-        let err = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap_err();
+        let err = build(&cli, ts("2026-10-22T00:00:00Z"))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("/nonexistent/crontab"));
     }
 
@@ -1844,7 +1873,9 @@ mod tests {
             crontabs: vec![InputPath::File(crontab_path)],
             ..Cli::default()
         };
-        let err = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap_err();
+        let err = build(&cli, ts("2026-10-22T00:00:00Z"))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("5000001"), "{err}");
         assert!(err.contains("5000000"), "{err}");
         assert!(err.contains("crontab"), "{err}");

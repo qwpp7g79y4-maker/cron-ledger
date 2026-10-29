@@ -72,14 +72,13 @@ pub fn use_color(no_color_set: bool, is_tty: bool) -> bool {
     is_tty && !no_color_set
 }
 
-/// Make a message safe to write to a terminal on stderr. Control
-/// characters (ESC, BEL, ...) become a visible `\u{...}` form like the
-/// text report's; newlines and tabs stay, since error messages and the
-/// usage text use them for layout.
-pub fn neutralize_controls_keep_newlines(s: &str) -> String {
+/// Make untrusted text (a path, a warning) safe to write to a terminal on
+/// stderr. Every control character, `\n` and `\t` included, becomes a
+/// visible `\u{...}` form, so the text cannot start a line of its own.
+pub fn neutralize_controls(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if c.is_control() && c != '\n' && c != '\t' {
+        if c.is_control() {
             out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
         } else {
             out.push(c);
@@ -176,10 +175,10 @@ mod tests {
     use crate::log::ExitStatus;
 
     #[test]
-    fn neutralize_keeps_newlines_and_escapes_esc() {
+    fn neutralize_escapes_esc_newline_cr_and_tab() {
         assert_eq!(
-            neutralize_controls_keep_newlines("a\x1b\n  - b\x07"),
-            "a\\u{1b}\n  - b\\u{7}"
+            neutralize_controls("a\x1b\n  - b\x07\r\t"),
+            "a\\u{1b}\\u{a}  - b\\u{7}\\u{d}\\u{9}"
         );
     }
 
