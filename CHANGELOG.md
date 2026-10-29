@@ -26,7 +26,9 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   instead of being audited as a job for user `""`.
 - A NUL byte in a syslog, journal or `.gz` log skips only its own line
   (with a warning); a log that is a quarter NUL or more is still refused.
-- A non-UTF-8 argument or a closed stderr no longer panics (exit 101).
+- A non-UTF-8 argument, or an error message written to a full stderr
+  (`2>/dev/full`), no longer panics (exit 101); both exit 2. A closed stderr
+  (`2>&-`) never panicked.
 
 ## [0.1.0] - 2026-10-24
 

@@ -253,6 +253,23 @@ fn help_flag_matches_golden_usage_text() {
 /// `/dev/full` exists on Linux. The other CI targets have no equivalent.
 #[cfg(target_os = "linux")]
 #[test]
+fn full_stderr_still_exits_two_instead_of_panicking() {
+    let full = std::fs::File::options()
+        .write(true)
+        .open("/dev/full")
+        .expect("open /dev/full");
+    let output = std::process::Command::cargo_bin("cron-ledger")
+        .expect("cron-ledger binary")
+        .arg("--bogus")
+        .stderr(full)
+        .output()
+        .expect("spawn cron-ledger");
+    assert_eq!(output.status.code(), Some(2), "{:?}", output.status);
+}
+
+/// `/dev/full` exists on Linux. The other CI targets have no equivalent.
+#[cfg(target_os = "linux")]
+#[test]
 fn full_stdout_exits_with_a_write_error_instead_of_panicking() {
     let root = empty_root();
     let dir = fixture("ok");
