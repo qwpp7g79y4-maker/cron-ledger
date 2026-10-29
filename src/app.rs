@@ -98,6 +98,12 @@ fn note_invalid_utf8(warnings: &mut Vec<String>, label: &str, text: &log::LogTex
             "{label}: invalid UTF-8 at byte {at}; replaced so the rest of the log can be read"
         ));
     }
+    if text.nul_lines_skipped > 0 {
+        warnings.push(format!(
+            "{label}: {} line(s) with a NUL byte skipped; the rest of the log was read",
+            text.nul_lines_skipped
+        ));
+    }
 }
 
 fn rejected_lines(result: &crontab::ParseResult) -> Vec<String> {
@@ -433,10 +439,12 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         if !root.is_dir() {
             return Err(format!("--system-root {}: not a directory", root.display()));
         }
+        let mut scanned_files = 0usize;
         let etc_crontab = root.join("etc/crontab");
         if etc_crontab.is_file() {
             match read_scanned(&etc_crontab) {
                 Ok(content) => {
+                    scanned_files += 1;
                     let label = etc_crontab.display().to_string();
                     let parsed = crontab::parse_system_crontab(&content, &label);
                     c.add_parse_result(parsed, &tz, since, until, tolerance)?;
@@ -470,6 +478,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                 }
                 match read_scanned(&file) {
                     Ok(content) => {
+                        scanned_files += 1;
                         let label = file.display().to_string();
                         let parsed = crontab::parse_system_crontab(&content, &label);
                         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
@@ -493,6 +502,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                     .to_string();
                 match read_scanned(&file) {
                     Ok(content) => {
+                        scanned_files += 1;
                         let label = file.display().to_string();
                         let parsed = crontab::parse_user_crontab(&content, &label, Some(&user));
                         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
@@ -500,6 +510,17 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                     Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
                 }
             }
+        }
+
+        if scanned_files == 0 {
+            let mut msg = format!(
+                "--system-root {}: no jobs found (no readable crontab file)",
+                root.display()
+            );
+            for w in &c.warnings {
+                msg.push_str(&format!("\n  - {w}"));
+            }
+            return Err(msg);
         }
     }
 
@@ -720,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn default_system_root_is_a_soft_no_op_when_isolated() {
+    fn empty_system_root_is_a_no_jobs_error() {
         let dir = std::env::temp_dir().join(format!("cron-ledger-app-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let cli = Cli {
@@ -729,8 +750,8 @@ mod tests {
             system_root: dir.clone(),
             ..Cli::default()
         };
-        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
-        assert!(audit.ledger.entries.is_empty());
+        let err = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap_err();
+        assert!(err.contains("no jobs found"), "{err}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1007,6 +1028,8 @@ mod tests {
             )
             .unwrap();
         }
+
+        std::fs::write(dir.join("etc/crontab"), "# no jobs\n").unwrap();
 
         let cli = Cli {
             since: "2026-10-20T00:00:00Z".to_string(),
@@ -1617,6 +1640,8 @@ mod tests {
             "0 5 * * * /usr/local/bin/alice.sh\n",
         )
         .unwrap();
+        std::fs::create_dir_all(root.join("etc")).unwrap();
+        std::fs::write(root.join("etc/crontab"), "# no jobs\n").unwrap();
         std::fs::set_permissions(&crontabs, std::fs::Permissions::from_mode(0o000)).unwrap();
         // Root can list a mode 000 directory, so the warning would not
         // appear. Skip rather than fail.

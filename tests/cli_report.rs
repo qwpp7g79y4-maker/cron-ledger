@@ -637,6 +637,7 @@ fn empty_crontab_file_is_a_usage_error_exit_two() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+#[cfg(unix)]
 #[test]
 fn non_utf8_argument_is_a_usage_error_not_a_panic() {
     use std::os::unix::ffi::OsStrExt;
@@ -648,4 +649,98 @@ fn non_utf8_argument_is_a_usage_error_not_a_panic() {
         .assert()
         .code(2);
     assert!(h1_stderr(&assert).contains("ok.cron"));
+}
+
+#[test]
+fn empty_system_root_scan_is_a_usage_error_exit_two() {
+    let root = empty_root();
+    let assert = h1_cmd(&root).assert().code(2);
+    let stderr = h1_stderr(&assert);
+    assert!(stderr.contains("no jobs found"), "{stderr}");
+    assert!(stderr.contains("--system-root"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn system_root_scan_with_only_unreadable_files_is_a_usage_error_exit_two() {
+    let root = empty_root();
+    std::fs::create_dir_all(root.join("etc/cron.d")).unwrap();
+    std::fs::write(root.join("etc/crontab"), b"\0\0").unwrap();
+    let mut utf16 = vec![0xff, 0xfe];
+    for unit in "0 3 * * * root /bin/backup.sh\n".encode_utf16() {
+        utf16.extend(unit.to_le_bytes());
+    }
+    std::fs::write(root.join("etc/cron.d/u16"), utf16).unwrap();
+    let assert = h1_cmd(&root).assert().code(2);
+    let stderr = h1_stderr(&assert);
+    assert!(stderr.contains("no jobs found"), "{stderr}");
+    assert!(stderr.contains("etc/crontab"), "{stderr}");
+    assert!(stderr.contains("etc/cron.d/u16"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+const H1_NUL_LOG: &[u8] = b"Oct 20 12:00:00 h CRON[1]: (root) CMD (/bin/other)\n\
+Oct 20 13:00:00 h CRON[2]: (root) CMD (/bin/x\0\0\0)\n\
+Oct 20 14:00:00 h CRON[3]: (root) CMD (/bin/after)\n";
+
+fn nul_log_run(root: &Path, log: &Path) -> (assert_cmd::assert::Assert, String) {
+    let crontab = root.join("nul.cron");
+    std::fs::write(
+        &crontab,
+        "0 12 * * * root /bin/other\n0 14 * * * root /bin/after\n",
+    )
+    .unwrap();
+    let assert = h1_cmd(root)
+        .arg("--crontab")
+        .arg(&crontab)
+        .arg("--syslog")
+        .arg(log)
+        .assert();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    (assert, stdout)
+}
+
+#[test]
+fn nul_in_the_middle_of_a_syslog_skips_only_that_line() {
+    let root = empty_root();
+    let log = root.join("nul.log");
+    std::fs::write(&log, H1_NUL_LOG).unwrap();
+    let (assert, stdout) = nul_log_run(&root, &log);
+    assert.code(0);
+    assert!(stdout.contains("2 OK"), "{stdout}");
+    assert!(
+        stdout.contains("1 line(s) with a NUL byte skipped"),
+        "{stdout}"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn nul_in_the_middle_of_a_gz_syslog_skips_only_that_line() {
+    use std::io::Write;
+    let root = empty_root();
+    let log = root.join("nul.log.gz");
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(H1_NUL_LOG).unwrap();
+    std::fs::write(&log, encoder.finish().unwrap()).unwrap();
+    let (assert, stdout) = nul_log_run(&root, &log);
+    assert.code(0);
+    assert!(stdout.contains("2 OK"), "{stdout}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn utf16_syslog_without_a_bom_is_still_refused_for_its_nul_bytes() {
+    let root = empty_root();
+    let log = root.join("u16.log");
+    let mut bytes = Vec::new();
+    for unit in String::from_utf8_lossy(H1_OTHER_LOG.as_bytes()).encode_utf16() {
+        bytes.extend(unit.to_le_bytes());
+    }
+    std::fs::write(&log, bytes).unwrap();
+    let (assert, _) = nul_log_run(&root, &log);
+    let stderr = h1_stderr(&assert.code(2));
+    assert!(stderr.contains("u16.log"), "{stderr}");
+    assert!(stderr.contains("NUL"), "{stderr}");
+    std::fs::remove_dir_all(&root).ok();
 }

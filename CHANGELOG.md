@@ -14,6 +14,10 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A named `--crontab`, `--crontab-user` or `--timer-unit` that yields no job
   (empty file, empty stdin, only invalid lines, a timer with no trigger) is
   now exit 2, and so is a `--system-root` that is not a directory.
+- A `--system-root` scan that reads no crontab file (empty root, or every
+  file UTF-16 or NUL) is now exit 2 with the reasons on stderr.
+- A NUL byte in a syslog, journal or `.gz` log skips only its own line
+  (with a warning); a log that is a quarter NUL or more is still refused.
 - A non-UTF-8 argument or a closed stderr no longer panics (exit 101).
 
 ## [0.1.0] - 2026-10-24
