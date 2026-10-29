@@ -3,7 +3,23 @@
 All notable changes to this project are documented in this file, in the
 style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.0] - unreleased
+
+### Changed
+
+- **Behaviour change from 0.1.1:** invalid UTF-8 in a crontab or a timer
+  unit is now refused with exit 2 and a message that names the byte offset.
+  0.1.1 read such input lossily and carried on with a warning. The strict
+  behaviour is intentional: a lossy read can silently change a job's
+  command or schedule, and the ledger would audit the wrong thing.
+- **Public API (`app` module):** `app::build` now returns
+  `Result<Audit, BuildError>` instead of `Result<Audit, String>`;
+  `BuildError` carries a `message` and a list of `details`.
+- **Public API (`log` module):** `LogText` has a new public field
+  `nul_lines_skipped`, and `read_log_source` now returns an
+  `InvalidData` error for a log that contains UTF-16 or too many NUL bytes.
+  Code that builds `LogText` by struct literal or matches on the old
+  `String` error needs updating.
 
 ### Fixed
 
