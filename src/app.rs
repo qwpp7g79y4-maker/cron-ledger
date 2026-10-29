@@ -440,6 +440,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             return Err(format!("--system-root {}: not a directory", root.display()));
         }
         let mut scanned_files = 0usize;
+        let mut scan_failed = 0usize;
         let etc_crontab = root.join("etc/crontab");
         if etc_crontab.is_file() {
             match read_scanned(&etc_crontab) {
@@ -449,7 +450,10 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                     let parsed = crontab::parse_system_crontab(&content, &label);
                     c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                 }
-                Err(e) => c.warnings.push(format!("{}: {e}", etc_crontab.display())),
+                Err(e) => {
+                    scan_failed += 1;
+                    c.warnings.push(format!("{}: {e}", etc_crontab.display()));
+                }
             }
         }
 
@@ -457,6 +461,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         if cron_d.is_dir() {
             let mut files = Vec::new();
             for (path, e) in collect_files(&cron_d, false, &mut files) {
+                scan_failed += 1;
                 c.warnings.push(format!("{}: {e}", path.display()));
             }
             for file in files {
@@ -483,7 +488,10 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                         let parsed = crontab::parse_system_crontab(&content, &label);
                         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                     }
-                    Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
+                    Err(e) => {
+                        scan_failed += 1;
+                        c.warnings.push(format!("{}: {e}", file.display()));
+                    }
                 }
             }
         }
@@ -492,6 +500,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         if spool.is_dir() {
             let mut files = Vec::new();
             for (path, e) in collect_files(&spool, true, &mut files) {
+                scan_failed += 1;
                 c.warnings.push(format!("{}: {e}", path.display()));
             }
             for file in files {
@@ -507,12 +516,20 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                         let parsed = crontab::parse_user_crontab(&content, &label, Some(&user));
                         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                     }
-                    Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
+                    Err(e) => {
+                        scan_failed += 1;
+                        c.warnings.push(format!("{}: {e}", file.display()));
+                    }
                 }
             }
         }
 
-        if scanned_files == 0 {
+        if scanned_files == 0 && scan_failed == 0 {
+            c.warnings.push(format!(
+                "--system-root {}: no crontab file found",
+                root.display()
+            ));
+        } else if scanned_files == 0 {
             let mut msg = format!(
                 "--system-root {}: no jobs found (no readable crontab file)",
                 root.display()
@@ -587,6 +604,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             // matching systemd's "Next elapse: never" (breaktest-cronledger-0005).
             let mut any_calendar_ever_elapses = false;
             let mut any_calendar_parsed = false;
+            let mut first_calendar_error: Option<String> = None;
             for cal_str in &timer.on_calendar {
                 match systemd::parse_calendar(cal_str) {
                     Ok(cal) => {
@@ -619,10 +637,18 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                                 .push(format!("{label}: OnCalendar '{cal_str}': {e}")),
                         }
                     }
-                    Err(e) => c
-                        .warnings
-                        .push(format!("{label}: OnCalendar '{cal_str}': {e}")),
+                    Err(e) => {
+                        let msg = format!("OnCalendar '{cal_str}': {e}");
+                        first_calendar_error.get_or_insert_with(|| msg.clone());
+                        c.warnings.push(format!("{label}: {msg}"));
+                    }
                 }
+            }
+            if !any_calendar_parsed && timer.unsupported_triggers.is_empty() {
+                return Err(format!(
+                    "{label}: no jobs found (no valid OnCalendar=, first: {})",
+                    first_calendar_error.unwrap_or_default()
+                ));
             }
             if any_calendar_parsed && all_times.is_empty() && !any_calendar_ever_elapses {
                 c.warnings.push(format!(
@@ -741,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_system_root_is_a_no_jobs_error() {
+    fn default_system_root_is_a_soft_no_op_when_isolated() {
         let dir = std::env::temp_dir().join(format!("cron-ledger-app-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let cli = Cli {
@@ -750,8 +776,10 @@ mod tests {
             system_root: dir.clone(),
             ..Cli::default()
         };
-        let err = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap_err();
-        assert!(err.contains("no jobs found"), "{err}");
+        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
+        assert!(audit.ledger.entries.is_empty());
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(warnings.contains("no crontab file found"), "{warnings}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1028,8 +1056,6 @@ mod tests {
             )
             .unwrap();
         }
-
-        std::fs::write(dir.join("etc/crontab"), "# no jobs\n").unwrap();
 
         let cli = Cli {
             since: "2026-10-20T00:00:00Z".to_string(),
