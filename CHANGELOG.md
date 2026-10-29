@@ -22,6 +22,8 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `OnCalendar=` with no value resets the list as it does in systemd.
 - A non-UTF-8 argument is refused with exit 2 and a message saying so, and
   control characters in a path are escaped in error messages on stderr.
+- A spool file whose name is not valid UTF-8 is skipped with a warning
+  instead of being audited as a job for user `""`.
 - A NUL byte in a syslog, journal or `.gz` log skips only its own line
   (with a warning); a log that is a quarter NUL or more is still refused.
 - A non-UTF-8 argument or a closed stderr no longer panics (exit 101).

@@ -736,6 +736,31 @@ fn newline_in_a_scanned_file_name_cannot_forge_a_stderr_line() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+#[cfg(unix)]
+#[test]
+fn spool_file_with_a_non_utf8_name_is_skipped_with_a_warning() {
+    use std::os::unix::ffi::OsStrExt;
+    let root = empty_root();
+    let d = root.join("var/spool/cron/crontabs");
+    std::fs::create_dir_all(&d).unwrap();
+    let name = std::ffi::OsStr::from_bytes(b"al\xffice");
+    std::fs::write(d.join(name), "0 12 * * * /bin/other\n").unwrap();
+    let log = root.join("other.log");
+    std::fs::write(&log, H1_OTHER_LOG).unwrap();
+    let assert = h1_cmd(&root).arg("--syslog").arg(&log).assert();
+    let out = assert.get_output();
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        !stdout.contains("/bin/other"),
+        "no job for user \"\": {stdout}"
+    );
+    assert!(
+        stdout.contains("file name is not valid UTF-8, so its user is unknown; skipped"),
+        "{stdout}"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
 fn timer_run(root: &Path, body: &str) -> assert_cmd::assert::Assert {
     let timer = root.join("g.timer");
     std::fs::write(&timer, body).unwrap();

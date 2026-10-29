@@ -530,11 +530,17 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
                 c.warnings.push(format!("{}: {e}", path.display()));
             }
             for file in files {
-                let user = file
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
+                let Some(user) = file.file_name().and_then(|n| n.to_str()) else {
+                    // A spool file is named after its user. Without a valid
+                    // name the job would run as someone unknown, so it is
+                    // not audited as user "" (that never matches a log).
+                    c.warnings.push(format!(
+                        "{}: file name is not valid UTF-8, so its user is unknown; skipped, but it may be an unaudited job",
+                        file.display()
+                    ));
+                    continue;
+                };
+                let user = user.to_string();
                 match read_scanned(&file) {
                     Ok(content) => {
                         scanned_files += 1;
