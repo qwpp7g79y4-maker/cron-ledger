@@ -23,6 +23,14 @@ pub enum JobSchedule {
     /// A systemd timer with only monotonic triggers this project cannot
     /// compute expected times for.
     UnsupportedTrigger,
+    /// One row of a saved `systemctl list-timers` listing. Already
+    /// judged: the ledger does not match it against logs. `overdue` is
+    /// the NEXT time when that elapse was due and LAST is older than it;
+    /// `last` is the LAST column, shown as the report's last run.
+    ListedTimer {
+        last: Option<Timestamp>,
+        overdue: Option<Timestamp>,
+    },
 }
 
 /// One job ready to be matched: its identity, where it came from, and its
@@ -118,6 +126,28 @@ fn job_key_label(key: &JobKey) -> String {
         JobKey::Cron { user, command } => format!("{user}: {command}"),
         JobKey::Timer { unit } => unit.clone(),
     }
+}
+
+/// One outcome for a list-timers row. When `overdue` is set, that NEXT
+/// is the expected time and LAST (if any) is only there so the report
+/// can show it; the status stays MISSED. Otherwise LAST itself is the
+/// run the check accepted.
+fn listed_timer_runs(last: Option<Timestamp>, overdue: Option<Timestamp>) -> Vec<RunOutcome> {
+    let Some(expected) = overdue.or(last) else {
+        return Vec::new();
+    };
+    let missed = overdue.is_some();
+    vec![RunOutcome {
+        expected,
+        status: if missed {
+            super::status::Status::Missed
+        } else {
+            super::status::Status::Ok
+        },
+        actual: last,
+        late_by: None,
+        exit_status: ExitStatus::Unknown,
+    }]
 }
 
 /// Build the ledger, taking coverage from `events` themselves.
@@ -307,6 +337,9 @@ pub(crate) fn build_ledger_from_coverage(
                     apply_persistent_catchup(&mut outcomes, &boots, job.persistent);
                     JobOutcome::Standard(outcomes)
                 }
+                JobSchedule::ListedTimer { last, overdue } => {
+                    JobOutcome::Standard(listed_timer_runs(*last, *overdue))
+                }
             };
             JobLedgerEntry {
                 key: job.key.clone(),
@@ -317,7 +350,16 @@ pub(crate) fn build_ledger_from_coverage(
         })
         .collect();
 
-    if log_coverage.is_empty() {
+    // A list-timers row is not log evidence. Its MISSED/OK is already
+    // decided, so the empty-log note would be false when those rows are
+    // the whole ledger. Jobs that do match logs still get the note.
+    let any_listed = jobs
+        .iter()
+        .any(|job| matches!(job.schedule, JobSchedule::ListedTimer { .. }));
+    let any_log_matched = jobs
+        .iter()
+        .any(|job| !matches!(job.schedule, JobSchedule::ListedTimer { .. }));
+    if log_coverage.is_empty() && (!any_listed || any_log_matched) {
         warnings.push(
             "no log events found in the window: every expected run is reported as NO_TRACE, \
              never MISSED"

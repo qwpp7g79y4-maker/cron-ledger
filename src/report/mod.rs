@@ -126,7 +126,16 @@ pub(super) fn job_views<'a>(
             let (expected, found, missed, late, last_run, first_missed) = match &entry.outcome {
                 JobOutcome::Standard(outcomes) => {
                     let expected = outcomes.len();
-                    let found = outcomes.iter().filter(|o| o.actual.is_some()).count();
+                    // `actual` on a MISSED/NO_TRACE row is not a run found
+                    // at the expected time. A list-timers check stores the
+                    // older LAST there so the report can print it.
+                    let found = outcomes
+                        .iter()
+                        .filter(|o| {
+                            o.actual.is_some()
+                                && !matches!(o.status, Status::Missed | Status::NoTrace)
+                        })
+                        .count();
                     let missed = outcomes
                         .iter()
                         .filter(|o| o.status == Status::Missed)

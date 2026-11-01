@@ -4,15 +4,16 @@
 //! and matching work.
 //!
 //! A source named explicitly on the command line (`--crontab`,
-//! `--timer-unit`, `--syslog`, ...) that cannot be read is a hard usage
-//! error (exit 2): the user asked for it by name. So is a window whose
-//! schedules expand to more than 5,000,000 expected runs. The `--system-root`
-//! scan runs only when no `--crontab`, `--crontab-user`, or `--timer-unit`
-//! was given. It is best-effort: a missing path is silently skipped, and
-//! an unreadable one becomes a warning, because the default root is `/`
-//! and much of it may not exist or may not be readable.
+//! `--timer-unit`, `--timers-list`, `--syslog`, ...) that cannot be read
+//! is a hard usage error (exit 2): the user asked for it by name. So is a
+//! window whose schedules expand to more than 5,000,000 expected runs.
+//! The `--system-root` scan runs only when no `--crontab`,
+//! `--crontab-user`, `--timer-unit`, or `--timers-list` was given. It is
+//! best-effort: a missing path is silently skipped, and an unreadable one
+//! becomes a warning, because the default root is `/` and much of it may
+//! not exist or may not be readable.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -275,6 +276,14 @@ impl Collector {
     }
 }
 
+fn describe_listed_timer(last: Option<Timestamp>, next: Option<Timestamp>) -> String {
+    let stamp = |ts: Option<Timestamp>| match ts {
+        Some(ts) => ts.to_string(),
+        None => "n/a".to_string(),
+    };
+    format!("list-timers LAST {} NEXT {}", stamp(last), stamp(next))
+}
+
 fn derive_service_unit(path: &InputPath) -> String {
     match path {
         InputPath::File(p) => {
@@ -455,11 +464,15 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
     // --system-root is the fallback source. A named --crontab,
     // --crontab-user, or --timer-unit is the whole set of jobs: also
     // walking the root would schedule a file the user already named a
-    // second time. Naming --system-root by itself still scans that
-    // directory. A missing path stays silent; an unreadable file or
-    // directory is a warning, never a hard error.
-    let named_job_source =
-        !cli.crontabs.is_empty() || !cli.crontab_users.is_empty() || !cli.timer_units.is_empty();
+    // second time. `--timers-list` is a named job source for the same
+    // reason: the saved listing is the audit, and the machine's own
+    // crontabs are not added on top. Naming --system-root by itself
+    // still scans that directory. A missing path stays silent; an
+    // unreadable file or directory is a warning, never a hard error.
+    let named_job_source = !cli.crontabs.is_empty()
+        || !cli.crontab_users.is_empty()
+        || !cli.timer_units.is_empty()
+        || !cli.timers_list.is_empty();
     if !named_job_source {
         let root = &cli.system_root;
         if !root.is_dir() {
@@ -704,10 +717,62 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
     }
 
     for path in &cli.timers_list {
-        c.warnings.push(format!(
-            "{}: --timers-list input is not implemented yet; ignored",
-            path.label()
-        ));
+        let content = read_text(path)?;
+        let label = path.label();
+        let parsed = systemd::parse_list_timers(&content, &label, &tz);
+        let mut file_warnings = parsed.warnings;
+        let before = c.jobs.len();
+        let mut seen_units = HashSet::new();
+        for row in parsed.timers {
+            if !seen_units.insert(row.unit.clone()) {
+                file_warnings.push(format!(
+                    "{label}:{}: {}: duplicate unit; skipped",
+                    row.line, row.unit
+                ));
+                continue;
+            }
+            let schedule =
+                match systemd::evaluate_listed_timer(row.last, row.next, until, tolerance) {
+                    systemd::ListedTimerVerdict::NothingToCheck => {
+                        file_warnings.push(format!(
+                            "{label}:{}: {}: NEXT and LAST give nothing to check; skipped",
+                            row.line, row.unit
+                        ));
+                        continue;
+                    }
+                    systemd::ListedTimerVerdict::Current { last } => JobSchedule::ListedTimer {
+                        last: Some(last),
+                        overdue: None,
+                    },
+                    systemd::ListedTimerVerdict::OlderThanExpected { last, expected } => {
+                        JobSchedule::ListedTimer {
+                            last,
+                            overdue: Some(expected),
+                        }
+                    }
+                };
+            c.account_expected_runs(&label, 1)?;
+            let key = JobKey::Timer {
+                unit: row.unit.clone(),
+            };
+            c.merge_description(&key, describe_listed_timer(row.last, row.next));
+            c.jobs.push(ScheduledJob {
+                key,
+                file: label.clone(),
+                line: row.line,
+                schedule,
+                tolerance,
+                persistent: false,
+                next_after_window: None,
+            });
+        }
+        if c.jobs.len() == before {
+            return Err(BuildError {
+                message: format!("{label}: no jobs found"),
+                details: file_warnings,
+            });
+        }
+        c.warnings.extend(file_warnings);
     }
 
     for path in &cli.syslogs {
@@ -1909,6 +1974,92 @@ mod tests {
             panic!("expected a standard outcome");
         };
         assert_eq!(outcomes.len(), 5_000_000);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_timers_list_is_a_usage_error() {
+        let cli = Cli {
+            since: "2026-10-23T00:00:00Z".to_string(),
+            until: Some("2026-10-25T00:00:00Z".to_string()),
+            timers_list: vec![InputPath::File(PathBuf::from(
+                "/nonexistent/cron-ledger-list-timers.txt",
+            ))],
+            system_root: PathBuf::from("/nonexistent/cron-ledger-root"),
+            ..Cli::default()
+        };
+        let err = build(&cli, ts("2026-10-26T00:00:00Z"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot read"), "{err}");
+        assert!(err.contains("list-timers.txt"), "{err}");
+        assert!(!err.contains("not a directory"), "{err}");
+    }
+
+    #[test]
+    fn timers_list_does_not_scan_the_system_root() {
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-timers-list-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc/crontab"), "0 3 * * * root /bin/backup.sh\n").unwrap();
+        let list = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/systemd/list-timers.txt");
+        let cli = Cli {
+            since: "2026-10-23T00:00:00Z".to_string(),
+            until: Some("2026-10-25T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            timers_list: vec![InputPath::File(list)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-26T00:00:00Z")).unwrap();
+        assert!(
+            audit
+                .ledger
+                .entries
+                .iter()
+                .all(|entry| matches!(entry.key, JobKey::Timer { .. })),
+            "the system crontab must not be added: {:?}",
+            audit.ledger.entries
+        );
+        assert_eq!(audit.ledger.entries.len(), 2);
+        let logrotate = audit
+            .ledger
+            .entries
+            .iter()
+            .find(|entry| matches!(&entry.key, JobKey::Timer { unit } if unit == "logrotate.timer"))
+            .expect("logrotate.timer");
+        let crate::ledger::JobOutcome::Standard(outcomes) = &logrotate.outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Ok);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-24T00:00:00Z")));
+        let backup = audit
+            .ledger
+            .entries
+            .iter()
+            .find(|entry| matches!(&entry.key, JobKey::Timer { unit } if unit == "backup.timer"))
+            .expect("backup.timer");
+        let crate::ledger::JobOutcome::Standard(outcomes) = &backup.outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Missed);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-23T06:00:00Z")));
+        assert_eq!(outcomes[0].expected, ts("2026-10-24T12:00:00Z"));
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(warnings.contains("pending.timer"), "{warnings}");
+        assert!(warnings.contains("idle.timer"), "{warnings}");
+        assert!(
+            !audit
+                .ledger
+                .warnings
+                .iter()
+                .any(|w| w.contains("no log events found")),
+            "list-timers is not log evidence: {:?}",
+            audit.ledger.warnings
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

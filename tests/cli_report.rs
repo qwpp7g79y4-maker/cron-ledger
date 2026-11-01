@@ -963,3 +963,46 @@ fn utf16_syslog_without_a_bom_is_still_refused_for_its_nul_bytes() {
     assert!(stderr.contains("NUL"), "{stderr}");
     std::fs::remove_dir_all(&root).ok();
 }
+
+#[test]
+fn timers_list_fixture_puts_the_last_run_in_the_report() {
+    let list = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/systemd/list-timers.txt");
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .arg("--system-root")
+        .arg("/nonexistent/cron-ledger-timers-list-root")
+        .arg("--timers-list")
+        .arg(&list)
+        .arg("--since")
+        .arg("2026-10-23T00:00:00Z")
+        .arg("--until")
+        .arg("2026-10-25T00:00:00Z")
+        .arg("--tz")
+        .arg("UTC")
+        .assert()
+        .code(1);
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).into_owned();
+    assert!(
+        stdout.contains("list-timers LAST 2026-10-24T00:00:00Z NEXT 2026-10-25T00:00:00Z"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("last run: 2026-10-24T00:00:00+00:00[UTC] (OK)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("last run: 2026-10-23T06:00:00+00:00[UTC] (MISSED)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("first missed times: 2026-10-24T12:00:00+00:00[UTC]"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("found: 0, missed: 1"), "{stdout}");
+    assert!(!stdout.contains("idle.timer ("), "{stdout}");
+    assert!(!stdout.contains("pending.timer ("), "{stdout}");
+    assert!(stdout.contains("give nothing to check"), "{stdout}");
+    assert!(!stdout.contains("not implemented"), "{stdout}");
+    assert!(!stdout.contains("no log events found"), "{stdout}");
+    assert!(!stdout.contains('\x1b'), "{stdout}");
+}

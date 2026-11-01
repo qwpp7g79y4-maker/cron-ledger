@@ -32,7 +32,7 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--tolerance 5m] [--json]
 ```
 
-`-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Elke andere waarde is een gebruiksfout en eindigt met exitcode 2, met de melding `'{value}' is not an RFC3339 timestamp or a duration like '30d'`. Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`. Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` zet die scan al uit, dus dat pad wordt niet gelezen. Het blijft in het voorbeeld staan zodat het weglaten van de bronvlag je eigen `/etc/crontab` en `/etc/cron.d/*` niet meeneemt.
+`-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Elke andere waarde is een gebruiksfout en eindigt met exitcode 2, met de melding `'{value}' is not an RFC3339 timestamp or a duration like '30d'`. Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`. Een expliciete `--crontab`, `--crontab-user`, `--timer-unit` of `--timers-list` zet die scan al uit, dus dat pad wordt niet gelezen. Het blijft in het voorbeeld staan zodat het weglaten van de bronvlag je eigen `/etc/crontab` en `/etc/cron.d/*` niet meeneemt.
 De paden `tests/fixtures/` hieronder bestaan alleen in een kloon van
 deze repository (`git clone`, daarna `cargo install --path .`). Na
 `cargo install cron-ledger` geef je je eigen bestanden mee met
@@ -40,7 +40,7 @@ deze repository (`git clone`, daarna `cargo install --path .`). Na
 
 ### Systeemcrontab (`--crontab`, en de standaardscan van `--system-root`)
 
-Zonder `--crontab`, `--crontab-user` of `--timer-unit` scant cron-ledger zelf `--system-root DIR` (standaard `/`) op `DIR/etc/crontab`, `DIR/etc/cron.d/*` en `DIR/var/spool/cron/**`, dezelfde indeling als een echt systeem. `--system-root` wijst die scan naar een momentopname in plaats van `/`, en de scan draait dan nog steeds. Eén van die drie vlaggen kiest precies de bestanden die je noemt en scant de systeemroot niet óók. Hetzelfde bestand een tweede keer lezen plant het commando twee keer in, en één logregel kan maar één van de twee kopieën dekken, zodat de extra kopie als `MISSED` zou gelden.
+Zonder `--crontab`, `--crontab-user`, `--timer-unit` of `--timers-list` scant cron-ledger zelf `--system-root DIR` (standaard `/`) op `DIR/etc/crontab`, `DIR/etc/cron.d/*` en `DIR/var/spool/cron/**`, dezelfde indeling als een echt systeem. `--system-root` wijst die scan naar een momentopname in plaats van `/`, en de scan draait dan nog steeds. Eén van die vlaggen kiest precies de bronnen die je noemt en scant de systeemroot niet óók. Hetzelfde bestand een tweede keer lezen plant het commando twee keer in, en één logregel kan maar één van de twee kopieën dekken, zodat de extra kopie als `MISSED` zou gelden.
 
 ```sh
 cron-ledger --system-root /path/to/a/system/snapshot \
@@ -73,6 +73,26 @@ cron-ledger --system-root /nonexistent \
   --timer-unit tests/fixtures/systemd/persistent-backup.timer \
   --journal-json tests/fixtures/logs/journal.jsonl \
   --since 2026-10-20T00:00:00Z --until 2026-10-21T00:00:00Z
+```
+
+### Opgeslagen `systemctl list-timers`-tekst (`--timers-list`)
+
+cron-ledger roept `systemctl` niet aan. Geef een tekstbestand mee dat je
+bewaarde van `systemctl list-timers --all` (kopregel en de voetregel
+`N timers listed.`). Alleen LAST, NEXT en UNIT worden gelezen. Er staat
+geen kalender in die lijst, dus dit is alleen een controle of de laatste
+run ouder is dan verwacht: als NEXT méér dan `--tolerance` vóór `--until`
+ligt, en LAST ontbreekt of méér dan `--tolerance` vóór die NEXT ligt, is
+de timer `MISSED` en is de laatste run in het rapport de LAST-kolom.
+Anders is die laatste run `OK`. Een rij met `n/a` of `-` in beide kolommen
+wordt met een waarschuwing overgeslagen. Een bestand zonder bruikbare rij
+is exitcode 2. De controle gebruikt geen logs, dus een lege log maakt er
+geen `NO_TRACE` van.
+
+```sh
+cron-ledger --system-root /nonexistent \
+  --timers-list tests/fixtures/systemd/list-timers.txt \
+  --since 2026-10-23T00:00:00Z --until 2026-10-25T00:00:00Z --tz UTC
 ```
 
 ### Debian/Ubuntu- of RHEL/cronie-syslog (`--syslog`), ook een `.gz`-rotatie
@@ -134,9 +154,10 @@ cron-ledger --system-root /nonexistent \
 - Geen anacron, fcron, Kubernetes CronJobs of macOS launchd (v1). Geen OnBootSec/OnUnitActiveSec.
 - Argumenten moeten geldige UTF-8 zijn; een argument dat dat niet is wordt met exitcode 2 geweigerd in plaats van lossy gelezen. Een bestand onder `var/spool/cron` met een naam die geen geldige UTF-8 is heeft geen bekende gebruiker en wordt met een waarschuwing overgeslagen (het kan een niet-gecontroleerde job zijn), in plaats van als gebruiker `""` gecontroleerd te worden.
 - Leest geen crontabs via `crontab -l` zelf; geef de uitvoer via stdin.
+- Roept `systemctl` niet aan. `--timers-list` leest een opgeslagen lijst; het programma voert `systemctl` nooit uit.
 - Het DST-gedrag volgt cronie; andere cron-implementaties kunnen afwijken.
 
-Specifiek voor deze versie: `--timers-list` (de tekstuitvoer van `systemctl list-timers --all`) wordt als optie geaccepteerd maar is nog niet geïmplementeerd; een opgegeven pad wordt met een waarschuwing genegeerd, niet gelezen. "Alleen-lezen" en "offline" worden alleen geclaimd voor wat `tests/readonly_fixtures.rs` en `tests/readonly_strace.rs` echt afdekken.
+"Alleen-lezen" en "offline" worden alleen geclaimd voor wat `tests/readonly_fixtures.rs` en `tests/readonly_strace.rs` echt afdekken.
 
 ## Alternatieven
 
@@ -152,7 +173,8 @@ Elke claim in deze README wordt gedekt door een bestaande test of fixture in dez
 | Claim | Test / fixture |
 |---|---|
 | `MISSED` alleen binnen het bereik van één invoerbestand, van de eerste herkende regel van dat bestand tot de laatste. Een gat binnen dat bereik zonder passende regel is `MISSED`, ook 19–21 oktober tussen een regel op de 18e en een regel op de 22e in hetzelfde bestand. Een gat tussen twee bestanden, ook niet-aansluitende `s.1` en `s.2.gz`, een gat vóór het eerste bestand of ná het laatste, een lege log, en een gat dat precies op de venstergrens tussen twee bestanden valt, zijn `NO_TRACE`. Een tijd gelijk aan de eerste of laatste regel van een bestand valt binnen dat bereik. `--json` `log_coverage` is de buitenste grens; het tekstrapport noemt elk bestandsbereik | `tests/ledger_golden.rs` (`log_gap_missed_only_in_covered_days`, `interior_gap_between_first_and_last_log_line_is_missed`, `gap_between_two_log_files_is_no_trace`, `gap_on_the_window_edge_between_two_files_is_no_trace`), `src/app.rs::non_adjacent_rotation_files_are_separate_coverage_spans`, `tests/cli_report.rs::no_trace_only_scenario_exits_three` (`tests/fixtures/report/no_trace/`) |
-| Een expliciete `--crontab`, `--crontab-user` of `--timer-unit` is de volledige verzameling jobs. De scan van `--system-root` draait dan niet óók, zodat een bestand onder die root niet een tweede keer wordt ingepland. `--system-root` zonder die vlaggen scant die map nog steeds | `src/app.rs::explicit_crontab_is_not_counted_again_by_the_system_root_scan`, `src/app.rs::system_root_default_scan_reads_etc_crontab_cron_d_and_spool` |
+| Een expliciete `--crontab`, `--crontab-user`, `--timer-unit` of `--timers-list` is de volledige verzameling jobs. De scan van `--system-root` draait dan niet óók, zodat een bestand onder die root niet een tweede keer wordt ingepland. `--system-root` zonder die vlaggen scant die map nog steeds | `src/app.rs::explicit_crontab_is_not_counted_again_by_the_system_root_scan`, `src/app.rs::timers_list_does_not_scan_the_system_root`, `src/app.rs::system_root_default_scan_reads_etc_crontab_cron_d_and_spool` |
+| `--timers-list` leest een opgeslagen `systemctl list-timers --all`-lijst (alleen LAST, NEXT, UNIT; geen aanroep van `systemctl`). De LAST-tijd is de laatste run in het rapport. Een NEXT die al vóór `--until` verschuldigd was, voorbij `--tolerance`, en waarvan LAST ontbreekt of ouder is dan die NEXT met méér dan `--tolerance`, is `MISSED`; anders is de laatste run `OK` | `src/systemd/list_timers.rs::fixture_last_runs_are_parsed`, `tests/cli_report.rs::timers_list_fixture_puts_the_last_run_in_the_report` (`tests/fixtures/systemd/list-timers.txt`) |
 | Een `journalctl -o json`-regel die een sleutel herhaalt wordt overgeslagen met een waarschuwing en is geen bewijs: er wordt geen run vastgelegd en de regel verlengt de logdekking niet | `src/log/journal.rs` (`duplicate_message_key_is_not_evidence`, `repeated_key_in_a_journal_object_is_not_evidence`) |
 | Een `--since`/`--until`-venster is begrensd op 5.000.000 verwachte runs over de hele audit. Het uitklappen van één schema stopt zodra dat schema al boven de grens zit, zodat een breed venster een duidelijke exitcode 2 is in plaats van eerst elk tijdstip te alloceren. Precies 5.000.000 runs worden nog steeds geaudit | `src/app.rs::window_over_the_expected_run_cap_is_a_usage_error_exit_two`, `src/app.rs::window_at_the_expected_run_cap_still_audits`, `src/schedule.rs::expand_bounded_stops_materialising_once_over_budget`, `src/systemd/calendar.rs::expand_bounded_stops_materialising_once_over_budget` |
 | Een genoemde jobbron zonder job, of een crontab of timer die UTF-16/UTF-32 is of een NUL-byte bevat, is exitcode 2; een UTF-8-BOM wordt gestript; een `--system-root` die geen map is of waarvan de scan alleen onleesbare crontabbestanden vond, is exitcode 2, een lege root waarschuwt en geeft 0; een timer met alleen ongeldige of lege `OnCalendar=` is exitcode 2, en `OnCalendar=` zonder waarde leegt de lijst zoals in systemd; een argument dat geen UTF-8 is wordt geweigerd met exitcode 2; een spoolbestand met een niet-UTF-8-naam wordt met een waarschuwing overgeslagen; stuurtekens in een pad, regeleinden inbegrepen, worden op stderr geëscapet | `tests/cli_report.rs` (`timer_unit_with_a_utf8_bom_keeps_its_timer_section`, `utf16_crontab_is_refused_with_exit_two`, `utf16_crontab_without_a_bom_is_refused_for_its_nul_bytes`, `nonexistent_system_root_is_a_usage_error_exit_two`, `crontab_with_only_invalid_lines_is_a_usage_error_exit_two`, `empty_stdin_crontab_is_a_usage_error_exit_two`, `empty_crontab_file_is_a_usage_error_exit_two`, `empty_system_root_scan_warns_and_exits_zero`, `system_root_scan_with_only_unreadable_files_is_a_usage_error_exit_two`, `system_root_with_one_unreadable_and_one_readable_file_still_audits`, `timer_with_only_an_invalid_oncalendar_is_a_usage_error_exit_two`, `timer_with_an_empty_oncalendar_is_a_usage_error_exit_two`, `timer_with_one_valid_and_one_invalid_oncalendar_still_audits`, `existing_non_utf8_file_name_is_refused_as_such`, `spool_file_with_a_non_utf8_name_is_skipped_with_a_warning`, `control_characters_in_a_path_are_escaped_in_error_messages`, `newline_in_a_path_cannot_forge_a_second_stderr_line`, `newline_in_a_scanned_file_name_cannot_forge_a_stderr_line`, `empty_report_with_no_jobs_and_empty_syslog_is_in_english`), `src/systemd/timer_unit.rs::empty_oncalendar_resets_the_list`, `src/report/mod.rs::neutralize_escapes_esc_newline_cr_and_tab` |

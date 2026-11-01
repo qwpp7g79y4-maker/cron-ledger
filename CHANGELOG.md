@@ -5,6 +5,18 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.2.0] - unreleased
 
+### Added
+
+- `--timers-list` reads a saved `systemctl list-timers --all` listing
+  (LAST, NEXT and UNIT only). It does not run `systemctl`. The report's
+  last run is that LAST column. A NEXT already due before `--until`, past
+  `--tolerance`, is `MISSED` when LAST is missing or older than that NEXT
+  by more than `--tolerance`; otherwise the last run is `OK`.
+- **Public API (`ledger` module):** `JobSchedule::ListedTimer` carries
+  that already-judged row. It is not matched against logs.
+- **Public API (`systemd` module):** `parse_list_timers` and
+  `evaluate_listed_timer`.
+
 ### Changed
 
 - **Behaviour change from 0.1.1:** invalid UTF-8 in a crontab or a timer

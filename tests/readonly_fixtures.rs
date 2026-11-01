@@ -102,6 +102,8 @@ fn running_against_a_read_only_fixture_copy_changes_nothing() {
         .arg(copy.join("crontab/system.crontab"))
         .arg("--timer-unit")
         .arg(copy.join("systemd/daily.timer"))
+        .arg("--timers-list")
+        .arg(copy.join("systemd/list-timers.txt"))
         .arg("--syslog")
         .arg(copy.join("logs/debian-syslog.log"))
         .arg("--journal-json")
