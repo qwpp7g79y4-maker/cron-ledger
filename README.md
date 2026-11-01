@@ -35,6 +35,8 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--tolerance 5m] [--json]
 ```
 
+The manual page is [man/cron-ledger.1](man/cron-ledger.1).
+
 `-` means stdin; at most one source across all flags may be stdin.
 `--since`/`--until` take either an RFC3339 timestamp or a
 `systemd.time(7)`-style duration counted back from now (`30d`, `2h`...).

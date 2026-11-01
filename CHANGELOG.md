@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file, in the
 style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Handbook for the binary: `man/cron-ledger.1` (a roff manual page whose usage line is the program's help text), `examples/` with an invented crontab and syslog plus the command and its exit code, and `tests/handbook_help.rs`. `README.md` points at the manual page.
+
 ## [0.2.0] - unreleased
 
 ### Added

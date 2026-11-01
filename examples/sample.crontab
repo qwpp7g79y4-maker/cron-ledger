@@ -1,0 +1,1 @@
+15 4 * * * audit /usr/local/bin/ledger-sample
