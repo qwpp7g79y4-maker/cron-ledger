@@ -181,7 +181,7 @@ cron-ledger --system-root /nonexistent \
 - Arguments must be valid UTF-8; one that is not is refused with exit 2 rather than read lossily. A file under `var/spool/cron` whose name is not valid UTF-8 has no known user, so it is skipped with a warning (it may be an unaudited job) instead of being audited as user `""`.
 - It does not run `crontab -l` itself; pass that output via stdin.
 - It does not run `systemctl`. `--timers-list` reads a saved listing; it never executes `systemctl`.
-- DST behaviour follows cronie; other cron implementations may differ.
+- DST behaviour follows cronie's daemon (`cron(8)` and `src/cron.c`): a fixed time in the spring gap runs once, just after the jump; a fixed time in the repeated autumn hour runs once; a wildcard hour runs in each physical hour. `crontab(5)` says the gap never matches and the repeated hour runs twice; that page does not match the daemon. Other cron implementations may differ. cronie itself can miss or double-run a job whose `CRON_TZ` is not the system zone; cron-ledger expands each job in its own zone with the same rules.
 
 "Read-only" and "offline" are only claimed for what `tests/readonly_fixtures.rs`
 and `tests/readonly_strace.rs` actually cover.

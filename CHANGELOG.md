@@ -5,14 +5,14 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
-
-- Handbook for the binary: `man/cron-ledger.1` (a roff manual page whose usage line is the program's help text), `examples/` with an invented crontab and syslog plus the command and its exit code, and `tests/handbook_help.rs`. `README.md` points at the manual page.
-
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-11-02
 
 ### Added
 
+- Handbook for the binary: `man/cron-ledger.1` (a roff manual page whose
+  usage line is the program's help text), `examples/` with an invented
+  crontab and syslog plus the command and its exit code, and
+  `tests/handbook_help.rs`. `README.md` points at the manual page.
 - `--timers-list` reads a saved `systemctl list-timers --all` listing
   (LAST, NEXT and UNIT only). It does not run `systemctl`. The report's
   last run is that LAST column. A NEXT already due before `--until`, past
@@ -25,6 +25,11 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- README: daylight-saving behaviour follows cronie's daemon (`cron(8)`
+  and `src/cron.c`), not the contradictory paragraph in `crontab(5)`.
+  The schedule itself is unchanged.
+- Security policy: the supported line is 0.2.x. Fixes go to the latest
+  release only.
 - **Behaviour change from 0.1.1:** invalid UTF-8 in a crontab or a timer
   unit is now refused with exit 2 and a message that names the byte offset.
   0.1.1 read such input lossily and carried on with a warning. The strict

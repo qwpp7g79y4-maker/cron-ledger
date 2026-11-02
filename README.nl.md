@@ -155,7 +155,7 @@ cron-ledger --system-root /nonexistent \
 - Argumenten moeten geldige UTF-8 zijn; een argument dat dat niet is wordt met exitcode 2 geweigerd in plaats van lossy gelezen. Een bestand onder `var/spool/cron` met een naam die geen geldige UTF-8 is heeft geen bekende gebruiker en wordt met een waarschuwing overgeslagen (het kan een niet-gecontroleerde job zijn), in plaats van als gebruiker `""` gecontroleerd te worden.
 - Leest geen crontabs via `crontab -l` zelf; geef de uitvoer via stdin.
 - Roept `systemctl` niet aan. `--timers-list` leest een opgeslagen lijst; het programma voert `systemctl` nooit uit.
-- Het DST-gedrag volgt cronie; andere cron-implementaties kunnen afwijken.
+- Het DST-gedrag volgt de cronie-daemon (`cron(8)` en `src/cron.c`): een vaste tijd in de lentesprong draait één keer, direct na de sprong; een vaste tijd in het herhaalde herfstuur draait één keer; een wildcard-uur draait in elk fysiek uur. `crontab(5)` zegt dat de sprong nooit matcht en het herhaalde uur twee keer draait; die pagina komt niet overeen met de daemon. Andere cron-implementaties kunnen afwijken. Cronie kan een job met een `CRON_TZ` anders dan de systeemzone missen of dubbel draaien; cron-ledger rekent elke job in zijn eigen zone met dezelfde regels.
 
 "Alleen-lezen" en "offline" worden alleen geclaimd voor wat `tests/readonly_fixtures.rs` en `tests/readonly_strace.rs` echt afdekken.
 

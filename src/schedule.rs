@@ -1,13 +1,18 @@
 //! Expansion of a parsed crontab [`Schedule`] into concrete expected run
 //! instants within a `[since, until)` window, timezone- and DST-aware.
 //!
-//! DST handling follows the behavior described in the project's task
-//! brief as "like cronie": a civil time that falls in a spring-forward gap
-//! is reported as a single run right at the moment the clock resumes; a
-//! civil time repeated by a fall-back fold runs once, at its earlier
-//! occurrence, for a fixed hour, but once per physical hour for a wildcard
-//! hour field. This has **not** been independently verified against
-//! cronie's source or a VM.
+//! The time crate is `jiff`. DST handling follows cronie's daemon.
+//! Checked on 2026-11-02 against cronie master `src/cron.c` (the `medium`
+//! and `negative` arms of `wakeupKind`) and `man/cron.8` ("Daylight Saving
+//! Time and other time changes"): a civil time in the spring-forward gap
+//! is one run at the instant the clock resumes; a fixed hour in the
+//! fall-back fold runs once, at the earlier occurrence; a wildcard hour
+//! runs once per physical hour. `crontab(5)` says a missing time never
+//! matches and a repeated time runs twice. That page does not match the
+//! daemon, so this code follows the daemon. cronie warns that a
+//! job-specific timezone can miss or double-run a job across DST; each
+//! job here is expanded in its own `CRON_TZ` with the same gap and fold
+//! rules.
 
 use crate::crontab::{matches_day, Field, Schedule};
 use jiff::tz::{AmbiguousOffset, Disambiguation, TimeZone};

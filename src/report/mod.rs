@@ -3,9 +3,8 @@
 //!
 //! Exit codes follow the documented CLI contract:
 //! **0** everything OK, **1** at least one MISSED or LATE, **3** only
-//! NO_TRACE and otherwise OK. A `--fail-on` flag was left as a documented
-//! future option rather than built now, since the brief marks its
-//! shape as undecided.
+//! NO_TRACE and otherwise OK. Exit 3 is the 0.2.0 contract. A `--fail-on`
+//! flag is not part of this release.
 
 mod json;
 mod text;
