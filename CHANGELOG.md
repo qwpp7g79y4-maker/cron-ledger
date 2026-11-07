@@ -5,6 +5,10 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- README and README.nl: state the measured test count (346 passed, 0 failed).
+
 ## [0.2.0] - 2026-11-02
 
 ### Added
