@@ -5,9 +5,20 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `examples/backup.*`: a second invented example (LATE and MISSED) with
+  stored expected output, and `tests/examples_golden.rs` comparing both
+  examples with it.
+- README and README.nl: Example and Options sections; every option in
+  `--help` is listed in both.
+
 ### Changed
 
-- README and README.nl: state the measured test count (346 passed, 0 failed).
+- Usage error messages now say what to do next; exit codes are unchanged.
+- `--help` lists `-h | --help` itself (also in the man page).
+- LICENSE-MIT and LICENSE-APACHE: copyright 2025-2026 PEPAI / Pepijn de Jonge.
+- README and README.nl: state the measured test count (349 passed, 0 failed).
 
 ## [0.2.0] - 2026-11-02
 

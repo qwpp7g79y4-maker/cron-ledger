@@ -1,6 +1,6 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-02. Branch: `fix/cl-h1-empty-input`. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `prep/v1-kwaliteit`. Measured on commit `2621aa7`. No tag, no push, no publish.
 
 Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-27). Host: Linux. `strace` 5.16 was on `PATH`.
 
@@ -9,15 +9,14 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 | Command | Exit |
 | --- | --- |
 | `cargo fmt --check` | 0 |
-| `cargo clippy -- -D warnings` | 0 |
-| `cargo test` | 0 |
-| `cargo package --allow-dirty --no-verify --list` | 0 |
+| `cargo clippy --all-targets -- -D warnings` | 0 |
+| `cargo test --no-fail-fast` | 0 |
 
-`cargo clippy` here is the command above. CI (`.github/workflows/ci.yml`) also runs `cargo clippy --all-targets --locked -- -D warnings`. That wider command was not re-run for this record.
+`cargo package` was not run for this record (not allowed in this phase); the earlier 0.2.0 package check is in the git history of this file.
 
 ### `cargo test`
 
-346 tests, 0 failed, 0 ignored. The strace test ran; it did not skip.
+349 tests, 0 failed, 0 ignored. The strace test ran; it did not skip.
 
 | Suite | Passed |
 | --- | ---: |
@@ -26,6 +25,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 | `tests/cli_e2e.rs` | 15 |
 | `tests/cli_report.rs` | 40 |
 | `tests/crontab_golden.rs` | 5 |
+| `tests/examples_golden.rs` | 3 |
 | `tests/handbook_help.rs` | 2 |
 | `tests/ledger_golden.rs` | 20 |
 | `tests/log_golden.rs` | 11 |
@@ -34,12 +34,6 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 | `tests/report_golden.rs` | 4 |
 | `tests/systemd_golden.rs` | 8 |
 | doc-tests | 0 |
-
-### `cargo package --allow-dirty --no-verify --list`
-
-Exit 0 before this file existed. That list had the crate sources, tests, fixtures, `man/cron-ledger.1`, `examples/`, both licenses, both READMEs, `CHANGELOG.md`, `SECURITY.md`, and `deny.toml`. It did not list `.github/`, `task.md`, or this file.
-
-The same command after this file was added also exited 0. That list has 107 paths and includes `QUALITY.md`.
 
 ## Decisions that close the open points in `task.md`
 
