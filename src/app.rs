@@ -58,17 +58,23 @@ fn read_text(path: &InputPath) -> Result<String, String> {
     let (bytes, name) = match path {
         InputPath::Stdin => {
             let mut buf = Vec::new();
-            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
-                .map_err(|e| format!("cannot read <stdin>: {e}"))?;
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf).map_err(|e| {
+                format!("cannot read <stdin>: {e}; check the command that pipes into cron-ledger")
+            })?;
             (buf, "<stdin>".to_string())
         }
         InputPath::File(p) => (
-            std::fs::read(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?,
+            std::fs::read(p).map_err(|e| {
+                format!(
+                    "cannot read {}: {e}; check that the path exists and is readable",
+                    p.display()
+                )
+            })?,
             p.display().to_string(),
         ),
     };
     Ok(log::decode_text(bytes, false)
-        .map_err(|e| format!("cannot read {name}: {e}"))?
+        .map_err(|e| format!("cannot read {name}: {e}; the input must be valid UTF-8 text"))?
         .text)
 }
 
@@ -83,13 +89,19 @@ fn read_log_text(path: &InputPath) -> Result<log::LogText, String> {
     match path {
         InputPath::Stdin => {
             let mut buf = Vec::new();
-            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
-                .map_err(|e| format!("cannot read <stdin>: {e}"))?;
-            log::decode_text(buf, true).map_err(|e| format!("cannot read <stdin>: {e}"))
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf).map_err(|e| {
+                format!("cannot read <stdin>: {e}; check the command that pipes into cron-ledger")
+            })?;
+            log::decode_text(buf, true).map_err(|e| {
+                format!("cannot read <stdin>: {e}; the input must be valid UTF-8 or gzip text")
+            })
         }
-        InputPath::File(p) => {
-            log::read_log_source(p).map_err(|e| format!("cannot read {}: {e}", p.display()))
-        }
+        InputPath::File(p) => log::read_log_source(p).map_err(|e| {
+            format!(
+                "cannot read {}: {e}; check that the path exists and is readable",
+                p.display()
+            )
+        }),
     }
 }
 
@@ -423,7 +435,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
     // An equal bound is an empty window and still a normal audit. An
     // inverted one expands to nothing and would otherwise exit 0.
     if until < since {
-        return Err(format!("--until ({until}) is earlier than --since ({since})").into());
+        return Err(format!("--until ({until}) is earlier than --since ({since}); swap them or choose a later --until").into());
     }
     let tolerance = cli.tolerance;
 
@@ -476,7 +488,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
     if !named_job_source {
         let root = &cli.system_root;
         if !root.is_dir() {
-            return Err(format!("--system-root {}: not a directory", root.display()).into());
+            return Err(format!("--system-root {}: not a directory; pass the root directory of a system tree, or drop --system-root", root.display()).into());
         }
         let mut scanned_files = 0usize;
         let mut scan_failed = 0usize;

@@ -32,7 +32,7 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
-            [--tolerance 5m] [--json]
+            [--tolerance 5m] [--json] [-h | --help]
 ```
 
 The manual page is [man/cron-ledger.1](man/cron-ledger.1).
@@ -151,6 +151,44 @@ cron-ledger --system-root /nonexistent \
   --syslog tests/fixtures/logs/debian-syslog.log \
   --since 2026-10-20T00:00:00Z --until 2026-10-21T00:00:00Z --json
 ```
+
+## Example
+
+Two invented inputs live in `examples/`, each with its expected output.
+From a clone of this repository:
+
+```sh
+cron-ledger --system-root /nonexistent \
+  --crontab-user ops=examples/backup.crontab \
+  --syslog examples/backup.log \
+  --since 2026-10-20T00:00:00Z --until 2026-10-23T00:00:00Z --tz UTC
+```
+
+The backup ran every day but 11 minutes late on 21 October (`LATE`), and
+the 12:00 job ran only once (two `MISSED`), so the exit code is 1. The
+full output is in `examples/backup.expected.txt`; the second example,
+`examples/sample.*`, is a clean run that exits 0.
+`tests/examples_golden.rs` compares both with their stored output.
+
+## Options
+
+| Option | Meaning |
+|---|---|
+| `--crontab PATH\|-` | System crontab (five fields, a user, a command). Repeatable. `-` is stdin. |
+| `--crontab-user USER=PATH` | Per-user crontab for `USER` (no user column). Repeatable. |
+| `--system-root DIR` | Root directory scanned for `etc/crontab`, `etc/cron.d` and `var/spool/cron` when no crontab or timer source is named. Default `/`. |
+| `--timer-unit PATH` | A systemd `.timer` unit file; its `OnCalendar=` is expanded. Repeatable. |
+| `--timers-list PATH\|-` | A saved `systemctl list-timers --all` listing. Repeatable. |
+| `--syslog PATH\|-` | A saved syslog or cron log; `.gz` is decompressed. Repeatable. |
+| `--journal-json PATH\|-` | A saved `journalctl -o json` export. Repeatable. |
+| `--since <RFC3339\|30d>` | Start of the window. Required. |
+| `--until <RFC3339\|30d>` | End of the window (half-open). Default: now. |
+| `--tz ZONE` | IANA timezone for expansion and zone-less log lines, e.g. `Europe/Amsterdam`. Default: system zone, else UTC. |
+| `--tolerance SPAN` | How late an event may be and still be `OK`. Default `5m`. |
+| `--json` | Write one JSON document instead of the text report. |
+| `-h`, `--help` | Print the usage text and exit 0. |
+
+`-` means stdin; at most one source across all options may be stdin.
 
 ## Statuses
 

@@ -1,0 +1,15 @@
+ops: /usr/local/bin/nightly-backup (examples/backup.crontab:3) [30 2 * * *]
+  expected: 3, found: 3, missed: 0, late: 1
+  last run: 2026-10-22T02:30:02+00:00[UTC] (OK)
+  missed times: -
+
+ops: /usr/local/bin/other-job (examples/backup.crontab:4) [0 12 * * *]
+  expected: 3, found: 1, missed: 2, late: 0
+  last run: 2026-10-22T12:00:00+00:00[UTC] (OK)
+  first missed times: 2026-10-20T12:00:00+00:00[UTC], 2026-10-21T12:00:00+00:00[UTC]
+
+----
+Summary: 3 OK, 1 LATE, 0 LATE (caught up), 2 MISSED, 0 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER
+Log coverage: 2026-10-20T02:30:01+00:00[UTC] .. 2026-10-22T12:00:00+00:00[UTC]
+Window: 2026-10-20T00:00:00+00:00[UTC] .. 2026-10-23T00:00:00+00:00[UTC] (tz UTC)
+Tolerance: 300s

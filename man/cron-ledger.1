@@ -7,7 +7,7 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
-            [--tolerance 5m] [--json]
+            [--tolerance 5m] [--json] [-h | --help]
 .fi
 .SH DESCRIPTION
 cron-ledger reads saved crontab files and systemd timer units, works out when each job should have run in a time window, and compares that with a saved syslog or journal.
@@ -34,6 +34,9 @@ selects the JSON report instead
 .RI ( schema_version
 1).
 .SH OPTIONS
+.TP
+.B -h\fR, \fB--help
+.RB "Print the usage text on stdout and exit 0. Every other option is ignored when " --help " is given."
 .TP
 .B --crontab \fIPATH\fR|\fB-\fR
 System crontab: five schedule fields, a user, then the command.

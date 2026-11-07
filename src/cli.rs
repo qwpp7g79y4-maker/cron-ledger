@@ -74,7 +74,7 @@ fn next_value<'a>(
 ) -> Result<&'a str, String> {
     args.next()
         .map(|s| s.as_str())
-        .ok_or_else(|| format!("{flag} requires a value"))
+        .ok_or_else(|| format!("{flag} requires a value; run cron-ledger --help for the syntax"))
 }
 
 /// Parse CLI arguments (everything after the binary name).
@@ -148,7 +148,11 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
                 let v = next_value(&mut args, "--tolerance")?;
                 cli.tolerance = parse_duration(v).map_err(|e| format!("--tolerance: {e}"))?;
             }
-            other => return Err(format!("unknown argument '{other}'")),
+            other => {
+                return Err(format!(
+                    "unknown argument '{other}'; run cron-ledger --help for the valid options"
+                ))
+            }
         }
     }
 
@@ -156,11 +160,13 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
         return Ok(cli);
     }
     if !since_set {
-        return Err("--since is required".to_string());
+        return Err(
+            "--since is required: say how far back to audit, for example --since 30d".to_string(),
+        );
     }
     if stdin_uses > 1 {
         return Err(format!(
-            "at most one source may read from stdin ('-'), got {stdin_uses}"
+            "at most one source may read from stdin ('-'), got {stdin_uses}; save the others to files and pass their paths"
         ));
     }
 
@@ -172,7 +178,7 @@ pub fn usage() -> &'static str {
      \x20           [--timer-unit PATH]... [--timers-list PATH|-]...\n\
      \x20           [--syslog PATH|-]... [--journal-json PATH|-]...\n\
      \x20           --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]\n\
-     \x20           [--tolerance 5m] [--json]\n"
+     \x20           [--tolerance 5m] [--json] [-h | --help]\n"
 }
 
 #[cfg(test)]

@@ -29,7 +29,7 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
-            [--tolerance 5m] [--json]
+            [--tolerance 5m] [--json] [-h | --help]
 ```
 
 `-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Elke andere waarde is een gebruiksfout en eindigt met exitcode 2, met de melding `'{value}' is not an RFC3339 timestamp or a duration like '30d'`. Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`. Een expliciete `--crontab`, `--crontab-user`, `--timer-unit` of `--timers-list` zet die scan al uit, dus dat pad wordt niet gelezen. Het blijft in het voorbeeld staan zodat het weglaten van de bronvlag je eigen `/etc/crontab` en `/etc/cron.d/*` niet meeneemt.
@@ -125,6 +125,45 @@ cron-ledger --system-root /nonexistent \
   --syslog tests/fixtures/logs/debian-syslog.log \
   --since 2026-10-20T00:00:00Z --until 2026-10-21T00:00:00Z --json
 ```
+
+## Voorbeeld
+
+In `examples/` staan twee verzonnen invoerbestanden, elk met de
+verwachte uitvoer. Vanuit een kloon van deze repository:
+
+```sh
+cron-ledger --system-root /nonexistent \
+  --crontab-user ops=examples/backup.crontab \
+  --syslog examples/backup.log \
+  --since 2026-10-20T00:00:00Z --until 2026-10-23T00:00:00Z --tz UTC
+```
+
+De back-up draaide elke dag, maar op 21 oktober 11 minuten te laat
+(`LATE`), en de taak van 12:00 draaide maar één keer (twee `MISSED`),
+dus de exitcode is 1. De volledige uitvoer staat in
+`examples/backup.expected.txt`; het tweede voorbeeld, `examples/sample.*`,
+is een schone run die met 0 eindigt. `tests/examples_golden.rs`
+vergelijkt beide met hun opgeslagen uitvoer.
+
+## Opties
+
+| Optie | Betekenis |
+|---|---|
+| `--crontab PATH\|-` | Systeemcrontab (vijf velden, een gebruiker, een commando). Herhaalbaar. `-` is stdin. |
+| `--crontab-user USER=PATH` | Crontab van één gebruiker `USER` (zonder gebruikerskolom). Herhaalbaar. |
+| `--system-root DIR` | Rootmap die wordt gescand op `etc/crontab`, `etc/cron.d` en `var/spool/cron` als er geen crontab- of timerbron is opgegeven. Standaard `/`. |
+| `--timer-unit PATH` | Een systemd-`.timer`-unitbestand; de `OnCalendar=` wordt uitgerekend. Herhaalbaar. |
+| `--timers-list PATH\|-` | Een opgeslagen `systemctl list-timers --all`-tekst. Herhaalbaar. |
+| `--syslog PATH\|-` | Een opgeslagen syslog of cronlog; `.gz` wordt uitgepakt. Herhaalbaar. |
+| `--journal-json PATH\|-` | Een opgeslagen `journalctl -o json`-export. Herhaalbaar. |
+| `--since <RFC3339\|30d>` | Begin van het venster. Verplicht. |
+| `--until <RFC3339\|30d>` | Einde van het venster (half-open). Standaard: nu. |
+| `--tz ZONE` | IANA-tijdzone voor het uitrekenen en voor logregels zonder zone, bijv. `Europe/Amsterdam`. Standaard: systeemzone, anders UTC. |
+| `--tolerance SPAN` | Hoe laat een gebeurtenis mag zijn en toch `OK` is. Standaard `5m`. |
+| `--json` | Eén JSON-document in plaats van het tekstrapport. |
+| `-h`, `--help` | Toon de gebruikstekst en stop met 0. |
+
+`-` betekent stdin; hooguit één bron over alle opties mag stdin zijn.
 
 ## Statussen
 
