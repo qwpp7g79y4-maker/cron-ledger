@@ -1,26 +1,110 @@
+mod signals;
+
 use std::io::{self, IsTerminal, Write};
 
+use cron_ledger::interrupt;
 use cron_ledger::{app, cli, diff, report};
+
+enum ReportWrite {
+    Done,
+    Failed(io::Error),
+    Interrupted,
+}
+
+/// Path of a temporary file next to `path`, on the same filesystem, so the
+/// finished report can replace `path` in one rename. SIGINT before that
+/// rename deletes the temporary file and leaves `path` as it was.
+fn temp_beside(path: &std::path::Path) -> std::path::PathBuf {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let mut name = std::ffi::OsString::from(".");
+    name.push(
+        path.file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("report")),
+    );
+    name.push(format!(".cron-ledger-{}.tmp", std::process::id()));
+    parent.join(name)
+}
 
 /// Write the whole report. `print!` / `println!` panic when this fails
 /// (a full disk, for example), which exits 101. A failed report is an
-/// ordinary error instead.
-fn write_stdout(text: &str) -> io::Result<()> {
-    let mut out = io::stdout().lock();
-    out.write_all(text.as_bytes())?;
-    out.flush()
+/// ordinary error instead. SIGINT during the write is held back so the
+/// bytes are not cut in half; the process then exits 130.
+fn write_stdout(text: &str) -> ReportWrite {
+    if interrupt::interrupted() {
+        return ReportWrite::Interrupted;
+    }
+    let result = signals::with_sigint_blocked(|| {
+        if interrupt::interrupted() {
+            return None;
+        }
+        let mut out = io::stdout().lock();
+        Some(out.write_all(text.as_bytes()).and_then(|()| out.flush()))
+    });
+    match result {
+        None => ReportWrite::Interrupted,
+        Some(Ok(())) if interrupt::interrupted() => ReportWrite::Interrupted,
+        Some(Ok(())) => ReportWrite::Done,
+        Some(Err(_)) if interrupt::interrupted() => ReportWrite::Interrupted,
+        Some(Err(err)) => ReportWrite::Failed(err),
+    }
 }
 
 /// Write the report to `--output`, or to stdout when that flag is absent.
-/// A missing parent directory is not created.
-fn write_report(path: Option<&std::path::Path>, text: &str) -> io::Result<()> {
+/// A missing parent directory is not created. SIGINT publishes nothing
+/// partial: the destination is replaced only after the new bytes are complete.
+fn write_report(path: Option<&std::path::Path>, text: &str) -> ReportWrite {
+    if interrupt::interrupted() {
+        return ReportWrite::Interrupted;
+    }
     let Some(path) = path else {
         return write_stdout(text);
     };
-    let mut file = std::fs::File::create(path).map_err(|err| annotate_path(path, err))?;
-    file.write_all(text.as_bytes())
-        .map_err(|err| annotate_path(path, err))?;
-    file.flush().map_err(|err| annotate_path(path, err))
+    let tmp = temp_beside(path);
+    let created = std::fs::File::create(&tmp).and_then(|mut file| {
+        file.write_all(text.as_bytes())?;
+        file.flush()
+    });
+    if let Err(err) = created {
+        let _ = std::fs::remove_file(&tmp);
+        if interrupt::interrupted() {
+            return ReportWrite::Interrupted;
+        }
+        return ReportWrite::Failed(annotate_path(path, err));
+    }
+    let renamed = signals::with_sigint_blocked(|| {
+        if interrupt::interrupted() {
+            return None;
+        }
+        Some(std::fs::rename(&tmp, path))
+    });
+    match renamed {
+        None => {
+            let _ = std::fs::remove_file(&tmp);
+            ReportWrite::Interrupted
+        }
+        Some(Ok(())) if interrupt::interrupted() => ReportWrite::Interrupted,
+        Some(Ok(())) => ReportWrite::Done,
+        Some(Err(_)) if interrupt::interrupted() => {
+            let _ = std::fs::remove_file(&tmp);
+            ReportWrite::Interrupted
+        }
+        Some(Err(err)) => {
+            let _ = std::fs::remove_file(&tmp);
+            ReportWrite::Failed(annotate_path(path, err))
+        }
+    }
+}
+
+/// Publish `text`, or stop with exit 130 when SIGINT was caught.
+fn publish(path: Option<&std::path::Path>, text: &str) {
+    match write_report(path, text) {
+        ReportWrite::Done => {}
+        ReportWrite::Interrupted => finish(interrupt::EXIT_INTERRUPTED),
+        ReportWrite::Failed(err) => report_write_error(err),
+    }
 }
 
 fn annotate_path(path: &std::path::Path, err: io::Error) -> io::Error {
@@ -31,8 +115,21 @@ fn annotate_path(path: &std::path::Path, err: io::Error) -> io::Error {
 }
 
 fn report_write_error(err: io::Error) -> ! {
+    if interrupt::interrupted() {
+        finish(interrupt::EXIT_INTERRUPTED);
+    }
     let _ = writeln!(io::stderr(), "cron-ledger: cannot write report: {err}");
     std::process::exit(2);
+}
+
+/// Exit `code`, unless SIGINT was caught: then stderr is one line and the
+/// status is 130. Ordinary codes are not renumbered.
+fn finish(code: i32) -> ! {
+    if interrupt::interrupted() {
+        let _ = writeln!(io::stderr(), "cron-ledger: interrupted by SIGINT");
+        std::process::exit(interrupt::EXIT_INTERRUPTED);
+    }
+    std::process::exit(code);
 }
 
 /// Write an error to stderr as `cron-ledger: <message>`, followed by the
@@ -40,6 +137,9 @@ fn report_write_error(err: io::Error) -> ! {
 /// message is untrusted (it can hold a path), so every control character,
 /// newlines included, is made visible: it cannot start a line of its own.
 fn fail_with(message: &str, extra: &str) -> ! {
+    if interrupt::interrupted() {
+        finish(interrupt::EXIT_INTERRUPTED);
+    }
     let mut err = io::stderr();
     let _ = writeln!(err, "cron-ledger: {}", report::neutralize_controls(message));
     let _ = write!(err, "{extra}");
@@ -73,6 +173,7 @@ fn args_want_extra(args: &[String]) -> bool {
 }
 
 fn main() {
+    signals::install();
     let mut raw_args: Vec<String> = Vec::new();
     for (i, arg) in std::env::args_os().skip(1).enumerate() {
         match arg.into_string() {
@@ -97,30 +198,27 @@ fn main() {
     };
 
     if parsed.version && !parsed.help {
-        if let Err(e) = write_stdout(concat!("cron-ledger ", env!("CARGO_PKG_VERSION"), "\n")) {
-            report_write_error(e);
-        }
-        return;
+        publish(
+            None,
+            concat!("cron-ledger ", env!("CARGO_PKG_VERSION"), "\n"),
+        );
+        finish(0);
     }
 
     if parsed.help {
-        if let Err(e) = write_stdout(cli::usage()) {
-            report_write_error(e);
-        }
-        return;
+        publish(None, cli::usage());
+        finish(0);
     }
 
     if let Some((old, new)) = &parsed.diff {
         match diff::diff_files(old, new) {
             Ok(result) => {
-                if let Err(e) = write_stdout(&result.text) {
-                    report_write_error(e);
-                }
+                publish(None, &result.text);
                 if parsed.verbose {
                     let lines = result.text.lines().filter(|line| !line.is_empty()).count();
                     let _ = writeln!(io::stderr(), "context: lines {lines}");
                 }
-                std::process::exit(if result.changed { 1 } else { 0 });
+                finish(if result.changed { 1 } else { 0 });
             }
             Err(message) => fail(&message),
         }
@@ -167,9 +265,7 @@ fn main() {
         };
         report::render_text(&audit.ledger, &ctx, color)
     };
-    if let Err(e) = write_report(parsed.output.as_deref(), &rendered) {
-        report_write_error(e);
-    }
+    publish(parsed.output.as_deref(), &rendered);
     if parsed.verbose {
         let warnings = audit.ledger.warnings.len() + audit.extra_warnings.len();
         let _ = writeln!(
@@ -179,7 +275,7 @@ fn main() {
         );
     }
 
-    std::process::exit(code);
+    finish(code);
 }
 
 #[cfg(test)]

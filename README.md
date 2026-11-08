@@ -230,8 +230,9 @@ full output is in `examples/backup.expected.txt`; the second example,
 | `1` | At least one `MISSED` or `LATE`. |
 | `2` | Usage or input/output error (bad flags, a `--since`/`--until` value that is neither an RFC3339 timestamp nor a duration, `--until` earlier than `--since`, more than one stdin source, an explicitly-named input file that can't be read, a file, a scanned crontab, a `--diff` report, or standard input larger than 268435456 bytes (256 MiB), a crontab or timer unit that is UTF-16/UTF-32 or contains a NUL byte, a log that is UTF-16/UTF-32 or at least one byte in four NUL, an argument that is not valid UTF-8, or a named source that yields no jobs (empty, only invalid lines, or a timer unit with no trigger or no valid `OnCalendar=`; an empty `--crontab -` included), a `--system-root` that is not a directory or whose scan found crontab files and could read none of them (a root with no crontab files is exit 0 with a `no crontab file found` warning), an `--since`/`--until` window whose schedule would expand past the expected-run cap, or the report cannot be written). |
 | `3` | No `MISSED`/`LATE`, but at least one `NO_TRACE`. |
+| `130` | SIGINT. No half-written report. An existing `--output` file is kept when the new report was not finished. Stderr is `cron-ledger: interrupted by SIGINT`. |
 
-Each named file, each crontab found by `--system-root`, each `--diff` report, and standard input may be at most 268435456 bytes (256 MiB). A larger input exits 2 and is not loaded. The message contains `file is larger than 268435456 bytes`. A `.gz` log is also refused when the inflated text passes that size.
+Each named file, each crontab found by `--system-root`, each `--diff` report, and standard input may be at most 268435456 bytes (256 MiB). A larger input exits 2 and is not loaded. The message contains `file is larger than 268435456 bytes`. A `.gz` log is also refused when the inflated text passes that size. SIGINT exits 130. A signal before the report is finished writes nothing to stdout and leaves an existing `--output` file as it was. Exit codes 0, 1, 2 and 3 are unchanged.
 
 ## What it does NOT do
 
@@ -284,6 +285,7 @@ none of the numbers in this README are unmeasured benchmark badges.
 | `@reboot` never produces expected times; it only reports found boots as `REBOOT_ONLY` | `tests/ledger_golden.rs::reboot_job_reports_found_boots_for_info_only` |
 | `MISSED` is only reported inside one input file's span, from that file's first recognised line to its last. A gap inside that span with no matching event is `MISSED`, including 19–21 October between a line on the 18th and a line on the 22nd in the same file. A gap between two files, including non-adjacent `s.1` and `s.2.gz`, a gap before the first file or after the last, an empty log, and a gap that falls on the window edge between two files are `NO_TRACE`. A time equal to a file's first or last line is inside that span. `--json` `log_coverage` is the outer bounds; the text report lists each file's span | `tests/ledger_golden.rs` (`log_gap_missed_only_in_covered_days`, `interior_gap_between_first_and_last_log_line_is_missed`, `gap_between_two_log_files_is_no_trace`, `gap_on_the_window_edge_between_two_files_is_no_trace`), `src/app.rs::non_adjacent_rotation_files_are_separate_coverage_spans`, `tests/cli_report.rs::no_trace_only_scenario_exits_three` (`tests/fixtures/report/no_trace/`) |
 | Exit codes 0/1/2/3 as documented above | `src/report/mod.rs` unit tests, `tests/cli_report.rs` (`ok_scenario_exits_zero`, `missed_scenario_exits_one`, `late_scenario_exits_one`, `no_trace_only_scenario_exits_three`, `missing_since_is_a_usage_error_exit_two`, `until_earlier_than_since_is_a_usage_error_exit_two`, `until_equal_to_since_still_audits`, `more_than_one_stdin_source_is_a_usage_error_exit_two`, `full_stdout_exits_with_a_write_error_instead_of_panicking`) |
+| SIGINT exits 130 and leaves no half-written report. An existing `--output` file is kept when the new report was not finished, and a signal before that writes nothing to stdout. Stderr is `cron-ledger: interrupted by SIGINT` | `tests/sigint.rs::sigint_on_blocked_stdin_writes_no_report_and_exits_130` |
 | A `--since`/`--until` window is capped at 5,000,000 expected runs across the whole audit. Expanding one schedule stops once that schedule is already over the cap, so a wide window is a clear exit-2 error instead of allocating every instant first. Exactly 5,000,000 runs still audits | `src/app.rs::window_over_the_expected_run_cap_is_a_usage_error_exit_two`, `src/app.rs::window_at_the_expected_run_cap_still_audits`, `src/schedule.rs::expand_bounded_stops_materialising_once_over_budget`, `src/systemd/calendar.rs::expand_bounded_stops_materialising_once_over_budget` |
 | Each named file, each crontab found by `--system-root`, each `--diff` report, and standard input may be at most 268435456 bytes (256 MiB). A larger input exits 2 and is not loaded. The message contains `file is larger than 268435456 bytes` | `tests/input_limit.rs::syslog_over_the_byte_limit_exits_2` |
 | `--json` emits a `schema_version: 1` report | `tests/cli_report.rs::json_flag_produces_a_schema_versioned_report`, `tests/report_golden.rs` |
@@ -310,8 +312,8 @@ The first three run in CI (`.github/workflows/ci.yml`) along with `cargo
 audit` and `cargo deny check`. Run `cargo package` yourself before a
 release; CI does not run it.
 
-`cargo test --no-fail-fast` last measured 412 passed, 0 failed, 0 ignored
-(257 unit tests, 155 in the integration suites), on branch `prep/w24-fout`.
+`cargo test --no-fail-fast` last measured 413 passed, 0 failed, 0 ignored
+(257 unit tests, 156 in the integration suites), on branch `prep/w24-fout`.
 
 ## Support
 

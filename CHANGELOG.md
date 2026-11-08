@@ -7,6 +7,7 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- SIGINT exits 130. Stderr is `cron-ledger: interrupted by SIGINT`. The report is not left half-written: `--output` keeps the previous file until the new report is complete, and a signal before that writes nothing. Ordinary exit codes stay 0, 1, 2 and 3. The input limit stays 268435456 bytes.
 - Each named file, each crontab found by `--system-root`, each `--diff` report, and standard input may be at most 268435456 bytes (256 MiB). A larger input exits 2 with `file is larger than 268435456 bytes` and is not loaded. A `.gz` log is refused when the inflated text passes that size. The measured 100 MiB input stays under this limit. Exit codes stay 0, 1, 2 and 3.
 - `tests/offline.rs`: `sample_audit_matches_expected_output_with_outgoing_connections_blocked` runs the sample audit in a network namespace (`unshare --user --map-root-user --net`) whose route table is empty. The report matches `examples/sample.expected.txt`. No provider and no price were added.
 - `--quiet` and `--verbose`. A pipe or a redirect omits the usage text after an error. `--verbose` prints that text and, on success, one `context:` line on stderr. `--quiet` omits both even on a terminal. The report on stdout is unchanged. Exit codes stay 0, 1, 2 and 3. `--quiet` together with `--verbose` is exit 2.

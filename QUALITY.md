@@ -1,6 +1,13 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the input-limit test. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the SIGINT test. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+
+### 2026-11-08 (W-48, SIGINT, branch prep/w24-fout)
+
+- SIGINT exits 130. Stderr is `cron-ledger: interrupted by SIGINT`. The report is not left half-written. `tests/sigint.rs` sends the signal through a pidfd of the child it spawned. Ordinary exit codes stay 0, 1, 2 and 3. The input limit stays 268435456 bytes.
+- `cargo test --no-fail-fast`: 413 passed / 0 failed / 0 ignored.
+- `cargo fmt --check`: clean. `cargo clippy --all-targets -- -D warnings`: clean.
+- Version stays 1.0.0. `rust-version` stays 1.85.
 
 ### 2026-11-08 (W-46, input limit, branch prep/w24-fout)
 
@@ -30,7 +37,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 ### `cargo test`
 
-412 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran. The over-limit test ran.
+413 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran. The over-limit test ran. The SIGINT test ran.
 
 | Suite | Passed |
 | --- | ---: |
@@ -52,6 +59,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 | `tests/readonly_fixtures.rs` | 2 |
 | `tests/readonly_strace.rs` | 1 |
 | `tests/report_golden.rs` | 4 |
+| `tests/sigint.rs` | 1 |
 | `tests/systemd_golden.rs` | 8 |
 | `tests/verbosity.rs` | 6 |
 | doc-tests | 0 |

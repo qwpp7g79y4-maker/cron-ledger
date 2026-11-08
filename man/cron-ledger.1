@@ -262,6 +262,16 @@ or
 .BR LATE ,
 and at least one
 .BR NO_TRACE .
+.TP
+.B 130
+SIGINT.
+The report is not left half-written.
+An existing
+.B --output
+file is kept when the new report was not finished, and nothing is written to stdout.
+Stderr is
+.BR "cron-ledger: interrupted by SIGINT" .
+Exit codes 0, 1, 2 and 3 are unchanged.
 .SH EXAMPLES
 The files
 .I examples/sample.crontab
