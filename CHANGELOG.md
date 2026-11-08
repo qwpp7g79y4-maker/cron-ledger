@@ -5,8 +5,14 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-- `--csv`: CSV export of the report.
-- `--diff OLD.json NEW.json`: compare two `--json` reports.
+### Added
+
+- `--csv`: write the report as CSV (RFC 4180, one row per audited run)
+  instead of the text report. It cannot be combined with `--json`.
+- `--diff OLD.json NEW.json`: compare two saved `--json` reports and list
+  added and removed jobs and runs whose status changed. It takes no other
+  option and reads no crontab or log. Exit 0 when the reports match, 1 when
+  they differ, 2 on an input error.
 
 ## [1.0.0] - 2026-11-08
 
@@ -14,6 +20,7 @@ The previous version is 0.2.0.
 
 ### Added
 
+- `--version` and `-V` print `cron-ledger <version>`.
 - `examples/backup.*`: a second invented example (LATE and MISSED) with
   stored expected output, and `tests/examples_golden.rs` comparing both
   examples with it.
@@ -91,17 +98,34 @@ The previous version is 0.2.0.
   (`2>/dev/full`), no longer panics (exit 101); both exit 2. A closed stderr
   (`2>&-`) never panicked.
 
-## [0.1.0] - 2026-10-24
-
-First release. There is no earlier tag, so this lists every commit since
-the first one, except commits that only update this file. The package
-version stays 0.1.0.
+## [0.1.1] - 2026-10-28
 
 ### Fixed
 
+- A non-UTF-8 byte in an explicitly named crontab or `.timer` file
+  (or on stdin) failed the whole run with exit 2. It is now replaced
+  and reported as a warning naming the file, the 1-based line and the
+  byte offset (`<file>:<line>: invalid UTF-8 at byte <n>; ...`), like a
+  syslog's; a missing file or a directory is still exit 2. Only the
+  first invalid byte is named, and commands that differ only in the
+  invalid byte read the same after replacement, so they count as one
+  command. (`256afe8`, `41a0801`)
+- The crontab DST rule only treated an hour field of exactly `*` as a
+  wildcard, so `0 */2 * * *` ran once in the repeated autumn hour while
+  `0 */1 * * *` ran twice, and `*/15 2 * * *` was caught up after the
+  spring jump. Like cronie's `MIN_STAR`/`HR_STAR`, a minute or hour
+  field starting with `*` now makes the job wildcard: it runs in both
+  copies of a repeated time and skips a time in the gap. (`f802be8`)
+- A systemd calendar named special with a trailing timezone (`daily UTC`,
+  `weekly Europe/Amsterdam`) was rejected, unlike `systemd-analyze
+  calendar`. It is now accepted. An unresolvable timezone name is
+  rejected when the unit is parsed, with the "unknown timezone"
+  warning only, instead of also warning that the schedule can never
+  run. (`35f5180`)
 - A systemd calendar bare value or range bound outside its field's own
   range (`*:*:60`, `*:60:00`, `*-13-*`) parsed and stored a value that
   can never occur, unlike `systemd-analyze calendar`, which rejects it.
+  (`b280ebe`)
 - A crontab or `OnCalendar=` date that can never occur (`0 0 31 2 *`,
   `*-02-31 00:00:00`) stored a job with 0 expected runs and no
   warning. Warn instead, without rejecting the job and without
@@ -112,7 +136,24 @@ version stays 0.1.0.
 - A systemd calendar `/step` applied to a bare `*` (`*:*/5:00`,
   `*-*-*/1`) was accepted as "every step", unlike
   `systemd-analyze calendar`, which rejects it; steps on an explicit
-  start (`*:0/5:00`) still work.
+  start (`*:0/5:00`) still work. (`f68c187`)
+
+### Changed
+
+- Lower peak memory when auditing a large syslog or journal: the file
+  label and the repeated user and command strings of each log line are
+  shared instead of allocated per line. On a synthetic 130 MB,
+  2,000,000-line syslog, peak RSS dropped from 783,892 KB to
+  470,748 KB with byte-identical JSON output. (`484e384`, `8392b1d`)
+
+## [0.1.0] - 2026-10-24
+
+First release. There is no earlier tag, so this lists every commit since
+the first one, except commits that only update this file. The package
+version stays 0.1.0.
+
+### Fixed
+
 - `--help` and both README synopses listed `--until` as RFC3339 only.
   `--until` takes an RFC3339 timestamp or a duration counted back from
   now, the same as `--since`. (`f900524`)
