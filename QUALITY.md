@@ -1,6 +1,6 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-08. Branch: `prep/w06-csv`. Measured on commit `3082cfa` plus the quick-start change. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `prep/w24-fout`. Measured on commit `3d8d429`. No tag, no push, no publish.
 
 Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-27). Host: Linux. `strace` 5.16 was on `PATH`.
 
@@ -58,7 +58,7 @@ Fuzzing, mutation testing, `git push`, `git tag`, and `cargo publish`.
 
 ## Measured: 100 MiB input (W-26, 2026-11-08)
 
-Release build (`cargo build --release`, commit `6cb6c5f`, tree clean). Input: a synthetic syslog of exactly 104857600 bytes (100 MiB), made in `/tmp` and not committed. It is the single line of `examples/sample.log` repeated, so the lines are almost identical; the last line has trailing spaces to reach the exact size. The tool read it without error and exited 0 with 1 OK.
+Release build (`cargo build --release`, commit `3d8d429`, branch `prep/w24-fout`, tree clean). Input: a synthetic syslog of exactly 104857600 bytes (100 MiB), made in `/tmp` and not committed. It is the single line of `examples/sample.log` repeated, so the lines are almost identical; the last line has trailing spaces to reach the exact size. The tool read it without error and exited 0 with 1 OK.
 
 Command:
 

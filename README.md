@@ -304,7 +304,7 @@ audit` and `cargo deny check`. Run `cargo package` yourself before a
 release; CI does not run it.
 
 `cargo test --no-fail-fast` last measured 397 passed, 0 failed, 0 ignored
-(253 unit tests, 144 in the integration suites), on branch `prep/w06-csv`.
+(253 unit tests, 144 in the integration suites), on commit `3d8d429`, branch `prep/w24-fout`.
 
 ## Support
 

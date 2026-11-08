@@ -15,7 +15,7 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   they differ, 2 on an input error.
 - README and README.nl have a section "Aan de slag in 5 minuten".
   `tests/readme_quickstart.rs` runs its commands literally. The measured
-  test count is 372.
+  test count is 397.
 
 ## [1.0.0] - 2026-11-08
 

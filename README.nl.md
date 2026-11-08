@@ -247,7 +247,7 @@ cargo package
 
 De eerste drie draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audit` en `cargo deny check`. Draai `cargo package` zelf voor een release; CI doet dit niet.
 
-`cargo test --no-fail-fast` gaf bij de laatste meting 397 geslaagd, 0 mislukt, 0 genegeerd (253 unittests, 144 in de integratiesuites), op tak `prep/w06-csv`.
+`cargo test --no-fail-fast` gaf bij de laatste meting 397 geslaagd, 0 mislukt, 0 genegeerd (253 unittests, 144 in de integratiesuites), op commit `3d8d429`, tak `prep/w24-fout`.
 
 ## Steunen
 
