@@ -16,7 +16,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 ### `cargo test`
 
-372 tests, 0 failed, 0 ignored. The strace test ran; it did not skip.
+397 tests, 0 failed, 0 ignored. The strace test ran; it did not skip.
 
 | Suite | Passed |
 | --- | ---: |
@@ -26,8 +26,10 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 | `tests/cli_report.rs` | 40 |
 | `tests/crontab_golden.rs` | 5 |
 | `tests/csv_diff.rs` | 7 |
+| `tests/error_messages.rs` | 24 |
 | `tests/examples_golden.rs` | 3 |
 | `tests/handbook_help.rs` | 2 |
+| `tests/json_schema.rs` | 1 |
 | `tests/ledger_golden.rs` | 20 |
 | `tests/log_golden.rs` | 11 |
 | `tests/readme_quickstart.rs` | 1 |
