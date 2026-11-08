@@ -48,6 +48,13 @@ fn main() {
         Err(e) => fail_with(&e.to_string(), &format!("\n{}\n", cli::usage())),
     };
 
+    if parsed.version && !parsed.help {
+        if let Err(e) = write_stdout(concat!("cron-ledger ", env!("CARGO_PKG_VERSION"), "\n")) {
+            report_write_error(e);
+        }
+        return;
+    }
+
     if parsed.help {
         if let Err(e) = write_stdout(cli::usage()) {
             report_write_error(e);

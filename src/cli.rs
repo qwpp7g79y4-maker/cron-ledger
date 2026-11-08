@@ -46,6 +46,7 @@ pub struct Cli {
     pub tolerance: Duration,
     pub json: bool,
     pub help: bool,
+    pub version: bool,
 }
 
 impl Default for Cli {
@@ -64,6 +65,7 @@ impl Default for Cli {
             tolerance: Duration::from_secs(300),
             json: false,
             help: false,
+            version: false,
         }
     }
 }
@@ -93,6 +95,7 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-h" | "--help" => cli.help = true,
+            "-V" | "--version" => cli.version = true,
             "--json" => cli.json = true,
             "--crontab" => {
                 let p = parse_input_path(next_value(&mut args, "--crontab")?);
@@ -156,7 +159,7 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
         }
     }
 
-    if cli.help {
+    if cli.help || cli.version {
         return Ok(cli);
     }
     if !since_set {
@@ -277,6 +280,14 @@ mod tests {
     #[test]
     fn bad_tolerance_is_an_error() {
         assert!(parse(&args(&["--since", "30d", "--tolerance", "banana"])).is_err());
+    }
+
+    #[test]
+    fn version_short_circuits_since_requirement() {
+        for flag in ["--version", "-V"] {
+            let cli = parse(&args(&[flag])).unwrap();
+            assert!(cli.version);
+        }
     }
 
     #[test]
