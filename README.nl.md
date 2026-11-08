@@ -177,6 +177,7 @@ vergelijkt beide met hun opgeslagen uitvoer.
 | `--tz ZONE` | IANA-tijdzone voor het uitrekenen en voor logregels zonder zone, bijv. `Europe/Amsterdam`. Standaard: systeemzone, anders UTC. |
 | `--tolerance SPAN` | Hoe laat een gebeurtenis mag zijn en toch `OK` is. Standaard `5m`. |
 | `--json` | Eén JSON-document in plaats van het tekstrapport. |
+| `--output PATH` | Schrijf het rapport naar dit bestand in plaats van standaarduitvoer. Een bestaand bestand wordt overschreven. Een ontbrekende bovenliggende map is exitcode 2 en wordt niet aangemaakt. |
 | `-h`, `--help` | Toon de gebruikstekst en stop met 0. |
 
 `-` betekent stdin; hooguit één bron over alle opties mag stdin zijn.

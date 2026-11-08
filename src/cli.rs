@@ -46,6 +46,8 @@ pub struct Cli {
     pub tolerance: Duration,
     pub json: bool,
     pub csv: bool,
+    /// `--output PATH`: write the report to this file instead of stdout.
+    pub output: Option<PathBuf>,
     /// `--diff OLD NEW`: compare two saved `--json` reports.
     pub diff: Option<(PathBuf, PathBuf)>,
     pub help: bool,
@@ -68,6 +70,7 @@ impl Default for Cli {
             tolerance: Duration::from_secs(300),
             json: false,
             csv: false,
+            output: None,
             diff: None,
             help: false,
             version: false,
@@ -109,6 +112,9 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
             "-V" | "--version" => cli.version = true,
             "--json" => cli.json = true,
             "--csv" => cli.csv = true,
+            "--output" => {
+                cli.output = Some(PathBuf::from(next_value(&mut args, "--output")?));
+            }
             "--diff" => {
                 let old = next_value(&mut args, "--diff")?;
                 let new = next_value(&mut args, "--diff")?;
@@ -210,7 +216,7 @@ pub fn usage() -> &'static str {
      \x20           [--timer-unit PATH]... [--timers-list PATH|-]...\n\
      \x20           [--syslog PATH|-]... [--journal-json PATH|-]...\n\
      \x20           --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]\n\
-     \x20           [--tolerance 5m] [--json | --csv] [-h | --help]\n\
+     \x20           [--tolerance 5m] [--json | --csv] [--output PATH] [-h | --help]\n\
      cron-ledger --diff OLD.json NEW.json\n"
 }
 
@@ -331,6 +337,14 @@ mod tests {
         assert!(parse(&args(&["--since", "30d", "--csv"])).unwrap().csv);
         let err = parse(&args(&["--since", "30d", "--csv", "--json"])).unwrap_err();
         assert!(err.contains("--csv"));
+    }
+
+    #[test]
+    fn output_path_is_parsed() {
+        let cli = parse(&args(&["--since", "30d", "--output", "out/report.txt"])).unwrap();
+        assert_eq!(cli.output, Some(PathBuf::from("out/report.txt")));
+        let err = parse(&args(&["--since", "30d", "--output"])).unwrap_err();
+        assert!(err.contains("--output"), "{err}");
     }
 
     #[test]

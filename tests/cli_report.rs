@@ -51,6 +51,65 @@ fn base_cmd(scenario: &str, root: &Path, until: &str) -> Command {
     cmd
 }
 
+fn output_cmd(root: &Path, report: &Path) -> Command {
+    let mut cmd = base_cmd("ok", root, "2026-10-21T00:00:00Z");
+    cmd.arg("--output").arg(report);
+    cmd
+}
+
+#[test]
+fn output_flag_writes_a_new_file() {
+    let root = empty_root();
+    let report = root.join("report.txt");
+    assert!(!report.exists());
+    let written = output_cmd(&root, &report).assert().code(0);
+    let written_out = written.get_output();
+    assert!(written_out.stdout.is_empty(), "stdout must stay empty");
+    assert!(written_out.stderr.is_empty(), "stderr must stay empty");
+    let on_stdout = base_cmd("ok", &root, "2026-10-21T00:00:00Z")
+        .assert()
+        .code(0);
+    let expected = on_stdout.get_output().stdout.clone();
+    assert!(!expected.is_empty());
+    assert_eq!(std::fs::read(&report).unwrap(), expected);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn output_flag_overwrites_an_existing_file() {
+    let root = empty_root();
+    let report = root.join("report.txt");
+    std::fs::write(&report, b"stale report that must be replaced\n").unwrap();
+    let written = output_cmd(&root, &report).assert().code(0);
+    assert!(written.get_output().stdout.is_empty());
+    let on_stdout = base_cmd("ok", &root, "2026-10-21T00:00:00Z")
+        .assert()
+        .code(0);
+    let expected = on_stdout.get_output().stdout.clone();
+    let body = std::fs::read(&report).unwrap();
+    assert_eq!(body, expected);
+    assert!(!String::from_utf8_lossy(&body).contains("stale"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn output_flag_missing_directory_exits_two() {
+    let root = empty_root();
+    let missing_dir = root.join("no-such-dir");
+    let report = missing_dir.join("report.txt");
+    let failed = output_cmd(&root, &report).assert().code(2);
+    let output = failed.get_output();
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot write report"), "stderr: {stderr}");
+    assert!(!report.exists());
+    assert!(
+        !missing_dir.exists(),
+        "a missing parent directory must not be created"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
 #[test]
 fn ok_scenario_exits_zero() {
     let root = empty_root();

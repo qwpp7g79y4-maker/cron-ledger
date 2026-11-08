@@ -11,6 +11,25 @@ fn write_stdout(text: &str) -> io::Result<()> {
     out.flush()
 }
 
+/// Write the report to `--output`, or to stdout when that flag is absent.
+/// A missing parent directory is not created.
+fn write_report(path: Option<&std::path::Path>, text: &str) -> io::Result<()> {
+    let Some(path) = path else {
+        return write_stdout(text);
+    };
+    let mut file = std::fs::File::create(path).map_err(|err| annotate_path(path, err))?;
+    file.write_all(text.as_bytes())
+        .map_err(|err| annotate_path(path, err))?;
+    file.flush().map_err(|err| annotate_path(path, err))
+}
+
+fn annotate_path(path: &std::path::Path, err: io::Error) -> io::Error {
+    io::Error::new(
+        err.kind(),
+        report::neutralize_controls(&format!("{}: {err}", path.display())),
+    )
+}
+
 fn report_write_error(err: io::Error) -> ! {
     let _ = writeln!(io::stderr(), "cron-ledger: cannot write report: {err}");
     std::process::exit(2);
@@ -105,12 +124,17 @@ fn main() {
         text.push('\n');
         text
     } else {
-        let no_color_set = std::env::var_os("NO_COLOR").is_some();
-        let is_tty = io::stdout().is_terminal();
-        let color = report::use_color(no_color_set, is_tty);
+        // A file is not a terminal, so the saved report has no color.
+        let color = if parsed.output.is_some() {
+            false
+        } else {
+            let no_color_set = std::env::var_os("NO_COLOR").is_some();
+            let is_tty = io::stdout().is_terminal();
+            report::use_color(no_color_set, is_tty)
+        };
         report::render_text(&audit.ledger, &ctx, color)
     };
-    if let Err(e) = write_stdout(&rendered) {
+    if let Err(e) = write_report(parsed.output.as_deref(), &rendered) {
         report_write_error(e);
     }
 

@@ -7,7 +7,7 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
-            [--tolerance 5m] [--json | --csv] [-h | --help]
+            [--tolerance 5m] [--json | --csv] [--output PATH] [-h | --help]
 cron-ledger --diff OLD.json NEW.json
 .fi
 .SH DESCRIPTION
@@ -196,6 +196,13 @@ Write the report as one JSON document
 Write the report as CSV (RFC 4180, one row per audited run) instead of the text report.
 Cannot be combined with
 .BR --json .
+.TP
+.B --output \fIPATH\fR
+Write the report to
+.I PATH
+instead of standard output.
+An existing file is replaced.
+If the parent directory does not exist, the program exits 2 and does not create it.
 .TP
 .B --diff \fIOLD.json\fR \fINEW.json\fR
 Compare two saved

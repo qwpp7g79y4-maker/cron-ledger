@@ -7,6 +7,9 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `--output PATH`: write the report to a file instead of standard output.
+  An existing file is replaced. A missing parent directory exits 2 and is
+  not created. Exit codes are unchanged.
 - `--csv`: write the report as CSV (RFC 4180, one row per audited run)
   instead of the text report. It cannot be combined with `--json`.
 - `--diff OLD.json NEW.json`: compare two saved `--json` reports and list
