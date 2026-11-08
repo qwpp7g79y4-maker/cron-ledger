@@ -243,6 +243,7 @@ Elke claim in deze README wordt gedekt door een bestaande test of fixture in dez
 | Een regel met een NUL-byte in een syslog, journal of `.gz`-log wordt overgeslagen met de waarschuwing `N line(s) with a NUL byte skipped`; de rest van de log wordt nog geaudit, tenzij minstens één byte op vier NUL is (`nuls*4 >= len`) | `src/log/source.rs::nul_share_boundary_is_one_in_four_for_a_lossy_log`, `tests/cli_report.rs` (`nul_in_the_middle_of_a_syslog_skips_only_that_line`, `nul_in_the_middle_of_a_gz_syslog_skips_only_that_line`, `utf16_syslog_without_a_bom_is_still_refused_for_its_nul_bytes`) |
 | Het tekstrapport toont hoogstens 50 waarschuwingen, met een regel `… and N more`; de `warnings`-array van `--json` heeft altijd de volledige lijst en het aantal | `src/report/text.rs::many_warnings_are_truncated_in_text_but_full_in_json`, `exactly_the_warning_cap_is_not_truncated` |
 | SIGINT eindigt met exitcode 130 en laat geen half rapport achter. Een bestaand `--output`-bestand blijft staan als het nieuwe rapport niet af was, en een signaal daarvóór schrijft niets naar stdout. Stderr is `cron-ledger: interrupted by SIGINT` | `tests/sigint.rs::sigint_on_blocked_stdin_writes_no_report_and_exits_130` |
+| `--version` en `-V` tonen `cron-ledger 1.0.0` en eindigen met exitcode 0. Een debug-build toont ook de git-commit als `git rev-parse --verify HEAD` die geeft. Een release-build toont alleen de versie. Er wordt geen commit verzonnen als git die niet geeft | `tests/version.rs` (`debug_version_flags_print_crate_version_and_git_sha_when_git_gives_one`, `release_version_flags_print_crate_version_without_a_sha`), `src/main.rs::git_object_name_accepts_only_a_rev_parse_object_name` |
 
 ## Ontwikkeling
 
@@ -255,7 +256,7 @@ cargo package
 
 De eerste drie draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audit` en `cargo deny check`. Draai `cargo package` zelf voor een release; CI doet dit niet.
 
-`cargo test --no-fail-fast` gaf bij de laatste meting 413 geslaagd, 0 mislukt, 0 genegeerd (257 unittests, 156 in de integratiesuites), op tak `prep/w24-fout`.
+`cargo test --no-fail-fast` gaf bij de laatste meting 416 geslaagd, 0 mislukt, 0 genegeerd (258 unittests, 158 in de integratiesuites), op tak `prep/w24-fout`.
 
 ## Steunen
 

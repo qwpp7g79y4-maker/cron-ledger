@@ -1,6 +1,13 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the SIGINT test. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the version-line test. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+
+### 2026-11-08 (W-66, version line, branch prep/w24-fout)
+
+- `--version` and `-V` print `cron-ledger 1.0.0` and exit 0. A debug build also prints the git commit when `git rev-parse --verify HEAD` provides one. A release build prints the version only. No commit is invented when git does not provide one. `tests/version.rs`.
+- `cargo test --no-fail-fast`: 416 passed / 0 failed / 0 ignored.
+- `cargo fmt --check`: clean. `cargo clippy --all-targets -- -D warnings`: clean.
+- Version stays 1.0.0. `rust-version` stays 1.85. The input limit stays 268435456 bytes. SIGINT stays exit 130. The README version stays 0.2.0.
 
 ### 2026-11-08 (W-48, SIGINT, branch prep/w24-fout)
 
@@ -37,12 +44,12 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 ### `cargo test`
 
-413 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran. The over-limit test ran. The SIGINT test ran.
+416 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran. The over-limit test ran. The SIGINT test ran. The version-line tests ran.
 
 | Suite | Passed |
 | --- | ---: |
 | `src/lib.rs` | 256 |
-| `src/main.rs` | 1 |
+| `src/main.rs` | 2 |
 | `tests/cli_e2e.rs` | 15 |
 | `tests/cli_report.rs` | 43 |
 | `tests/crontab_golden.rs` | 5 |
@@ -62,6 +69,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 | `tests/sigint.rs` | 1 |
 | `tests/systemd_golden.rs` | 8 |
 | `tests/verbosity.rs` | 6 |
+| `tests/version.rs` | 2 |
 | doc-tests | 0 |
 
 ## Decisions that close the open points in `task.md`

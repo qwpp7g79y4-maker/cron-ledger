@@ -172,6 +172,39 @@ fn args_want_extra(args: &[String]) -> bool {
     wants_extra(quiet, verbose, io::stderr().is_terminal())
 }
 
+/// `cron-ledger <crate version>` for `--version` and `-V`.
+///
+/// A debug build appends the commit when `git rev-parse --verify HEAD`
+/// printed a hex object name at build time. Any other answer is left off.
+/// A release build does not carry a commit.
+fn version_text() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    #[cfg(debug_assertions)]
+    if let Some(sha) = recorded_git_sha() {
+        if git_object_name(sha) {
+            return format!("cron-ledger {version} {sha}\n");
+        }
+    }
+    format!("cron-ledger {version}\n")
+}
+
+/// Commit recorded by `build.rs`, or nothing when git did not provide one.
+#[cfg(debug_assertions)]
+fn recorded_git_sha() -> Option<&'static str> {
+    let sha = include_str!(concat!(env!("OUT_DIR"), "/git_sha.txt")).trim();
+    if sha.is_empty() {
+        None
+    } else {
+        Some(sha)
+    }
+}
+
+/// A hex object name as `git rev-parse` prints it (SHA-1 or SHA-256).
+#[cfg(debug_assertions)]
+fn git_object_name(text: &str) -> bool {
+    matches!(text.len(), 40 | 64) && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn main() {
     signals::install();
     let mut raw_args: Vec<String> = Vec::new();
@@ -198,10 +231,8 @@ fn main() {
     };
 
     if parsed.version && !parsed.help {
-        publish(
-            None,
-            concat!("cron-ledger ", env!("CARGO_PKG_VERSION"), "\n"),
-        );
+        let text = version_text();
+        publish(None, &text);
         finish(0);
     }
 
@@ -289,5 +320,20 @@ mod tests {
         assert!(!wants_extra(false, false, false));
         assert!(wants_extra(false, false, true));
         assert!(!wants_extra(true, true, true));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn git_object_name_accepts_only_a_rev_parse_object_name() {
+        use super::git_object_name;
+
+        assert!(git_object_name("0123456789abcdef0123456789abcdef01234567"));
+        assert!(git_object_name(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ));
+        assert!(!git_object_name(""));
+        assert!(!git_object_name("unknown"));
+        assert!(!git_object_name("20d46b5"));
+        assert!(!git_object_name("gggggggggggggggggggggggggggggggggggggggg"));
     }
 }

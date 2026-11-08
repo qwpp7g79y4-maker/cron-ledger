@@ -138,6 +138,8 @@ fn diff_with_unreadable_or_invalid_input_exits_two() {
 fn version_flags_still_work() {
     for flag in ["--version", "-V"] {
         let mut cmd = Command::cargo_bin("cron-ledger").unwrap();
-        assert_eq!(stdout_of(cmd.arg(flag), 0), "cron-ledger 1.0.0\n");
+        let out = stdout_of(cmd.arg(flag), 0);
+        assert!(out.starts_with("cron-ledger 1.0.0"), "{out}");
+        assert!(out.ends_with('\n'), "{out}");
     }
 }
