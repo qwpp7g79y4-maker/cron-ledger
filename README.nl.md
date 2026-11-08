@@ -215,7 +215,7 @@ vergelijkt beide met hun opgeslagen uitvoer.
 - Roept `systemctl` niet aan. `--timers-list` leest een opgeslagen lijst; het programma voert `systemctl` nooit uit.
 - Het DST-gedrag volgt de cronie-daemon (`cron(8)` en `src/cron.c`): een vaste tijd in de lentesprong draait één keer, direct na de sprong; een vaste tijd in het herhaalde herfstuur draait één keer; een wildcard-uur draait in elk fysiek uur. `crontab(5)` zegt dat de sprong nooit matcht en het herhaalde uur twee keer draait; die pagina komt niet overeen met de daemon. Andere cron-implementaties kunnen afwijken. Cronie kan een job met een `CRON_TZ` anders dan de systeemzone missen of dubbel draaien; cron-ledger rekent elke job in zijn eigen zone met dezelfde regels.
 
-"Alleen-lezen" en "offline" worden alleen geclaimd voor wat `tests/readonly_fixtures.rs` en `tests/readonly_strace.rs` echt afdekken.
+"Alleen-lezen" en "offline" worden alleen geclaimd voor wat `tests/readonly_fixtures.rs`, `tests/readonly_strace.rs` en `tests/offline.rs` echt afdekken.
 
 ## Alternatieven
 
@@ -250,7 +250,7 @@ cargo package
 
 De eerste drie draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audit` en `cargo deny check`. Draai `cargo package` zelf voor een release; CI doet dit niet.
 
-`cargo test --no-fail-fast` gaf bij de laatste meting 397 geslaagd, 0 mislukt, 0 genegeerd (253 unittests, 144 in de integratiesuites), op commit `3d8d429`, tak `prep/w24-fout`.
+`cargo test --no-fail-fast` gaf bij de laatste meting 411 geslaagd, 0 mislukt, 0 genegeerd (257 unittests, 154 in de integratiesuites), op tak `prep/w24-fout`.
 
 ## Steunen
 

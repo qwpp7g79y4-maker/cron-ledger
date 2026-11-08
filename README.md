@@ -242,8 +242,8 @@ full output is in `examples/backup.expected.txt`; the second example,
 - It does not run `systemctl`. `--timers-list` reads a saved listing; it never executes `systemctl`.
 - DST behaviour follows cronie's daemon (`cron(8)` and `src/cron.c`): a fixed time in the spring gap runs once, just after the jump; a fixed time in the repeated autumn hour runs once; a wildcard hour runs in each physical hour. `crontab(5)` says the gap never matches and the repeated hour runs twice; that page does not match the daemon. Other cron implementations may differ. cronie itself can miss or double-run a job whose `CRON_TZ` is not the system zone; cron-ledger expands each job in its own zone with the same rules.
 
-"Read-only" and "offline" are only claimed for what `tests/readonly_fixtures.rs`
-and `tests/readonly_strace.rs` actually cover.
+"Read-only" and "offline" are only claimed for what `tests/readonly_fixtures.rs`,
+`tests/readonly_strace.rs` and `tests/offline.rs` actually cover.
 
 ## Alternatives
 
@@ -291,6 +291,7 @@ none of the numbers in this README are unmeasured benchmark badges.
 | `--help` output | `tests/cli_report.rs::help_flag_matches_golden_usage_text` (`tests/golden/help.txt`), `src/cli.rs::usage_shows_until_accepts_rfc3339_or_a_duration` |
 | Read-only: running against a copy of every fixture with all write bits cleared changes nothing (not a byte, not an mtime) | `tests/readonly_fixtures.rs::running_against_a_read_only_fixture_copy_changes_nothing` |
 | Offline: no `socket`/`connect` syscall and no write-capable `openat`, observed under `strace` in CI (skipped, not failed, where `strace` is unavailable) | `tests/readonly_strace.rs::strace_sees_no_network_calls_and_no_write_capable_openat` |
+| Offline: the sample audit matches `examples/sample.expected.txt` inside a network namespace with no outbound route | `tests/offline.rs::sample_audit_matches_expected_output_with_outgoing_connections_blocked` |
 | No network crate (`reqwest`, `hyper`, `ureq`, `curl`) anywhere in the dependency tree | `.github/workflows/ci.yml`'s `readonly-static-check` and `deny` jobs, `deny.toml` |
 
 ## Development
@@ -306,8 +307,8 @@ The first three run in CI (`.github/workflows/ci.yml`) along with `cargo
 audit` and `cargo deny check`. Run `cargo package` yourself before a
 release; CI does not run it.
 
-`cargo test --no-fail-fast` last measured 397 passed, 0 failed, 0 ignored
-(253 unit tests, 144 in the integration suites), on commit `3d8d429`, branch `prep/w24-fout`.
+`cargo test --no-fail-fast` last measured 411 passed, 0 failed, 0 ignored
+(257 unit tests, 154 in the integration suites), on branch `prep/w24-fout`.
 
 ## Support
 

@@ -1,6 +1,13 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-08. Branch: `prep/w24-fout`. Measured on commit `3d8d429`. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the outgoing-connection test. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+
+### 2026-11-08 (W-45, sample audit with outgoing connections blocked, branch prep/w24-fout)
+
+- `tests/offline.rs`: `sample_audit_matches_expected_output_with_outgoing_connections_blocked` runs the sample audit inside `unshare --user --map-root-user --net`. That namespace has an empty route table. The report matches `examples/sample.expected.txt`. No provider and no price were added.
+- `cargo test --no-fail-fast`: 411 passed / 0 failed / 0 ignored.
+- `cargo fmt --check`: clean. `cargo clippy --all-targets -- -D warnings`: clean.
+- Version stays 1.0.0. `rust-version` stays 1.85. Exit codes stay 0, 1, 2 and 3.
 
 Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-27). Host: Linux. `strace` 5.16 was on `PATH`.
 
@@ -16,14 +23,14 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 ### `cargo test`
 
-397 tests, 0 failed, 0 ignored. The strace test ran; it did not skip.
+411 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran.
 
 | Suite | Passed |
 | --- | ---: |
-| `src/lib.rs` | 253 |
-| `src/main.rs` | 0 |
+| `src/lib.rs` | 256 |
+| `src/main.rs` | 1 |
 | `tests/cli_e2e.rs` | 15 |
-| `tests/cli_report.rs` | 40 |
+| `tests/cli_report.rs` | 43 |
 | `tests/crontab_golden.rs` | 5 |
 | `tests/csv_diff.rs` | 7 |
 | `tests/error_messages.rs` | 24 |
@@ -32,11 +39,13 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 | `tests/json_schema.rs` | 1 |
 | `tests/ledger_golden.rs` | 20 |
 | `tests/log_golden.rs` | 11 |
+| `tests/offline.rs` | 1 |
 | `tests/readme_quickstart.rs` | 1 |
 | `tests/readonly_fixtures.rs` | 2 |
 | `tests/readonly_strace.rs` | 1 |
 | `tests/report_golden.rs` | 4 |
 | `tests/systemd_golden.rs` | 8 |
+| `tests/verbosity.rs` | 6 |
 | doc-tests | 0 |
 
 ## Decisions that close the open points in `task.md`
