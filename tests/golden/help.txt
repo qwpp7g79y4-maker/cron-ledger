@@ -2,5 +2,5 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
-            [--tolerance 5m] [--json | --csv] [--output PATH] [-h | --help]
+            [--tolerance 5m] [--json | --csv] [--output PATH] [--quiet | --verbose] [-h | --help]
 cron-ledger --diff OLD.json NEW.json

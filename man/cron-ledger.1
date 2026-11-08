@@ -7,7 +7,7 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
-            [--tolerance 5m] [--json | --csv] [--output PATH] [-h | --help]
+            [--tolerance 5m] [--json | --csv] [--output PATH] [--quiet | --verbose] [-h | --help]
 cron-ledger --diff OLD.json NEW.json
 .fi
 .SH DESCRIPTION
@@ -204,11 +204,22 @@ instead of standard output.
 An existing file is replaced.
 If the parent directory does not exist, the program exits 2 and does not create it.
 .TP
+.B --quiet
+Hide the usage text after an error, even when stderr is a terminal.
+No context line.
+.TP
+.B --verbose
+Print the usage text after an error, and on success one context line on stderr, even when stderr is a pipe.
+.TP
 .B --diff \fIOLD.json\fR \fINEW.json\fR
 Compare two saved
 .B --json
 reports and list added and removed jobs and runs whose status changed.
-Takes no other option and reads no crontab or log.
+Besides
+.B --quiet
+and
+.BR --verbose ,
+it takes no other option and reads no crontab or log.
 Exit 0 when the reports match, 1 when they differ, 2 on an input error.
 .SH EXIT STATUS
 .TP

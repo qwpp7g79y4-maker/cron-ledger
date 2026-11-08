@@ -50,6 +50,28 @@ fn fail(message: &str) -> ! {
     fail_with(message, "")
 }
 
+/// The usage text after an error is extra context.
+///
+/// A terminal shows it. A pipe or a redirect does not. `--verbose` shows it
+/// anyway. `--quiet` hides it even on a terminal. The report on stdout is
+/// unchanged either way. Both flags together are a usage error (exit 2)
+/// and never reach a report.
+fn wants_extra(quiet: bool, verbose: bool, terminal: bool) -> bool {
+    if quiet {
+        false
+    } else if verbose {
+        true
+    } else {
+        terminal
+    }
+}
+
+fn args_want_extra(args: &[String]) -> bool {
+    let quiet = args.iter().any(|arg| arg == "--quiet");
+    let verbose = args.iter().any(|arg| arg == "--verbose");
+    wants_extra(quiet, verbose, io::stderr().is_terminal())
+}
+
 fn main() {
     let mut raw_args: Vec<String> = Vec::new();
     for (i, arg) in std::env::args_os().skip(1).enumerate() {
@@ -64,7 +86,14 @@ fn main() {
     }
     let parsed = match cli::parse(&raw_args) {
         Ok(c) => c,
-        Err(e) => fail_with(&e.to_string(), &format!("\n{}\n", cli::usage())),
+        Err(e) => {
+            let trailer = if args_want_extra(&raw_args) {
+                format!("\n{}\n", cli::usage())
+            } else {
+                String::new()
+            };
+            fail_with(&e.to_string(), &trailer);
+        }
     };
 
     if parsed.version && !parsed.help {
@@ -86,6 +115,10 @@ fn main() {
             Ok(result) => {
                 if let Err(e) = write_stdout(&result.text) {
                     report_write_error(e);
+                }
+                if parsed.verbose {
+                    let lines = result.text.lines().filter(|line| !line.is_empty()).count();
+                    let _ = writeln!(io::stderr(), "context: lines {lines}");
                 }
                 std::process::exit(if result.changed { 1 } else { 0 });
             }
@@ -137,6 +170,28 @@ fn main() {
     if let Err(e) = write_report(parsed.output.as_deref(), &rendered) {
         report_write_error(e);
     }
+    if parsed.verbose {
+        let warnings = audit.ledger.warnings.len() + audit.extra_warnings.len();
+        let _ = writeln!(
+            io::stderr(),
+            "context: jobs {}, warnings {warnings}",
+            audit.ledger.entries.len()
+        );
+    }
 
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wants_extra;
+
+    #[test]
+    fn extra_follows_quiet_verbose_and_the_terminal() {
+        assert!(!wants_extra(true, false, true));
+        assert!(wants_extra(false, true, false));
+        assert!(!wants_extra(false, false, false));
+        assert!(wants_extra(false, false, true));
+        assert!(!wants_extra(true, true, true));
+    }
 }

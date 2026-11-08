@@ -7,6 +7,7 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `--quiet` and `--verbose`. A pipe or a redirect omits the usage text after an error. `--verbose` prints that text and, on success, one `context:` line on stderr. `--quiet` omits both even on a terminal. The report on stdout is unchanged. Exit codes stay 0, 1, 2 and 3. `--quiet` together with `--verbose` is exit 2.
 - `--output PATH`: write the report to a file instead of standard output.
   An existing file is replaced. A missing parent directory exits 2 and is
   not created. Exit codes are unchanged.

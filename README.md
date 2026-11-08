@@ -203,8 +203,10 @@ full output is in `examples/backup.expected.txt`; the second example,
 | `--tolerance SPAN` | How late an event may be and still be `OK`. Default `5m`. |
 | `--json` | Write one JSON document instead of the text report. |
 | `--csv` | Write CSV, one row per audited run. Not combinable with `--json`. |
-| `--diff OLD.json NEW.json` | Compare two saved `--json` reports; takes no other option. Exit 0 identical, 1 different, 2 input error. |
+| `--diff OLD.json NEW.json` | Compare two saved `--json` reports. Besides `--quiet` and `--verbose`, it takes no other option. Exit 0 identical, 1 different, 2 input error. |
 | `--output PATH` | Write the report to this file instead of standard output. An existing file is replaced. A missing parent directory exits 2 and is not created. |
+| `--quiet` | Hide the usage text after an error, even on a terminal. No context line. |
+| `--verbose` | Print the usage text after an error, and on success one `context:` line on stderr, even on a pipe. |
 | `-h`, `--help` | Print the usage text and exit 0. |
 
 `-` means stdin; at most one source across all options may be stdin.

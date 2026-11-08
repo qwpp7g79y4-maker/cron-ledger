@@ -178,6 +178,8 @@ vergelijkt beide met hun opgeslagen uitvoer.
 | `--tolerance SPAN` | Hoe laat een gebeurtenis mag zijn en toch `OK` is. Standaard `5m`. |
 | `--json` | Eén JSON-document in plaats van het tekstrapport. |
 | `--output PATH` | Schrijf het rapport naar dit bestand in plaats van standaarduitvoer. Een bestaand bestand wordt overschreven. Een ontbrekende bovenliggende map is exitcode 2 en wordt niet aangemaakt. |
+| `--quiet` | Verberg de gebruikstekst na een fout, ook op een terminal. Geen contextregel. |
+| `--verbose` | Toon de gebruikstekst na een fout, en bij succes één `context:`-regel op stderr, ook in een pipe. |
 | `-h`, `--help` | Toon de gebruikstekst en stop met 0. |
 
 `-` betekent stdin; hooguit één bron over alle opties mag stdin zijn.

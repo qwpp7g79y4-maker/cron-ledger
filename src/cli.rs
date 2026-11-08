@@ -50,6 +50,10 @@ pub struct Cli {
     pub output: Option<PathBuf>,
     /// `--diff OLD NEW`: compare two saved `--json` reports.
     pub diff: Option<(PathBuf, PathBuf)>,
+    /// `--quiet`: hide the usage text after an error. No context line.
+    pub quiet: bool,
+    /// `--verbose`: print the usage text after an error, and on success one context line.
+    pub verbose: bool,
     pub help: bool,
     pub version: bool,
 }
@@ -72,6 +76,8 @@ impl Default for Cli {
             csv: false,
             output: None,
             diff: None,
+            quiet: false,
+            verbose: false,
             help: false,
             version: false,
         }
@@ -115,6 +121,8 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
             "--output" => {
                 cli.output = Some(PathBuf::from(next_value(&mut args, "--output")?));
             }
+            "--quiet" => cli.quiet = true,
+            "--verbose" => cli.verbose = true,
             "--diff" => {
                 let old = next_value(&mut args, "--diff")?;
                 let new = next_value(&mut args, "--diff")?;
@@ -185,8 +193,16 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
     if cli.help || cli.version {
         return Ok(cli);
     }
+    if cli.quiet && cli.verbose {
+        return Err("--quiet and --verbose cannot be combined; pick one".to_string());
+    }
     if cli.diff.is_some() {
-        if raw_args.len() != 3 {
+        // `--quiet` and `--verbose` do not change the comparison.
+        let rest = raw_args
+            .iter()
+            .filter(|arg| arg.as_str() != "--quiet" && arg.as_str() != "--verbose")
+            .count();
+        if rest != 3 {
             return Err(
                 "--diff takes exactly two report files and no other option: cron-ledger --diff OLD.json NEW.json"
                     .to_string(),
@@ -216,7 +232,7 @@ pub fn usage() -> &'static str {
      \x20           [--timer-unit PATH]... [--timers-list PATH|-]...\n\
      \x20           [--syslog PATH|-]... [--journal-json PATH|-]...\n\
      \x20           --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]\n\
-     \x20           [--tolerance 5m] [--json | --csv] [--output PATH] [-h | --help]\n\
+     \x20           [--tolerance 5m] [--json | --csv] [--output PATH] [--quiet | --verbose] [-h | --help]\n\
      cron-ledger --diff OLD.json NEW.json\n"
 }
 
@@ -366,5 +382,25 @@ mod tests {
     #[test]
     fn usage_shows_until_accepts_rfc3339_or_a_duration() {
         assert!(usage().contains("--until <RFC3339|30d>"));
+    }
+
+    #[test]
+    fn quiet_and_verbose_parse_and_conflict() {
+        let quiet = parse(&args(&["--quiet", "--since", "30d"])).unwrap();
+        assert!(quiet.quiet && !quiet.verbose);
+        let verbose = parse(&args(&["--since", "30d", "--verbose"])).unwrap();
+        assert!(verbose.verbose && !verbose.quiet);
+        let err = parse(&args(&["--quiet", "--verbose"])).unwrap_err();
+        assert!(err.contains("cannot be combined"), "{err}");
+    }
+
+    #[test]
+    fn diff_allows_quiet_or_verbose_and_still_rejects_other_options() {
+        let cli = parse(&args(&["--quiet", "--diff", "a.json", "b.json"])).unwrap();
+        assert!(cli.quiet);
+        assert!(cli.diff.is_some());
+        let cli = parse(&args(&["--diff", "a.json", "b.json", "--verbose"])).unwrap();
+        assert!(cli.verbose);
+        assert!(parse(&args(&["--diff", "a.json", "b.json", "--json"])).is_err());
     }
 }
