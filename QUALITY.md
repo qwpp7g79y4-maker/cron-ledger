@@ -1,6 +1,6 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-08. Branch: `prep/v1-kwaliteit`. Measured on commit `2621aa7`. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `v1-kandidaat`. Measured on commit `a0573db`. No tag, no push, no publish.
 
 Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-27). Host: Linux. `strace` 5.16 was on `PATH`.
 
