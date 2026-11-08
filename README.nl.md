@@ -22,6 +22,22 @@ cargo install --path .
 
 Beide installeren de binary `cron-ledger` in `~/.cargo/bin` (of waar `cargo install` op jouw systeem normaal binaries neerzet).
 
+## Aan de slag in 5 minuten
+
+Installeer cron-ledger zoals bij Installatie en zet het op je `PATH`. Draai de
+onderstaande commando's vanuit de hoofdmap van de repository. Ze lezen de
+verzonnen crontab- en syslogbestanden in `examples/`: geen `/var/log`, geen
+`journalctl`, geen netwerk. De test `tests/readme_quickstart.rs` draait deze
+regels letterlijk.
+
+```sh
+cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --syslog examples/sample.log --since 2026-10-20T00:00:00Z --until 2026-10-21T00:00:00Z --tz UTC
+cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --syslog examples/sample.log --since 2026-10-20T00:00:00Z --until 2026-10-21T00:00:00Z --tz UTC --csv
+```
+
+Het eerste commando drukt het rapport uit `examples/sample.expected.txt` af:
+één run, status OK, exitcode 0. Het tweede geeft dezelfde run als CSV.
+
 ## Gebruik
 
 ```
@@ -231,7 +247,7 @@ cargo package
 
 De eerste drie draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audit` en `cargo deny check`. Draai `cargo package` zelf voor een release; CI doet dit niet.
 
-`cargo test --no-fail-fast` gaf bij de laatste meting 371 geslaagd, 0 mislukt, 0 genegeerd (253 unittests, 118 in de integratiesuites), op commit 7c7d900.
+`cargo test --no-fail-fast` gaf bij de laatste meting 372 geslaagd, 0 mislukt, 0 genegeerd (253 unittests, 119 in de integratiesuites), op tak `prep/w06-csv`.
 
 ## Steunen
 

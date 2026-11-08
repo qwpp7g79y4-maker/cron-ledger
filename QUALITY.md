@@ -1,6 +1,6 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-08. Branch: `v1-kandidaat`. Measured on commit `a0573db`. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `prep/w06-csv`. Measured on commit `3082cfa` plus the quick-start change. No tag, no push, no publish.
 
 Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-27). Host: Linux. `strace` 5.16 was on `PATH`.
 
@@ -16,19 +16,21 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 ### `cargo test`
 
-349 tests, 0 failed, 0 ignored. The strace test ran; it did not skip.
+372 tests, 0 failed, 0 ignored. The strace test ran; it did not skip.
 
 | Suite | Passed |
 | --- | ---: |
-| `src/lib.rs` | 238 |
+| `src/lib.rs` | 253 |
 | `src/main.rs` | 0 |
 | `tests/cli_e2e.rs` | 15 |
 | `tests/cli_report.rs` | 40 |
 | `tests/crontab_golden.rs` | 5 |
+| `tests/csv_diff.rs` | 7 |
 | `tests/examples_golden.rs` | 3 |
 | `tests/handbook_help.rs` | 2 |
 | `tests/ledger_golden.rs` | 20 |
 | `tests/log_golden.rs` | 11 |
+| `tests/readme_quickstart.rs` | 1 |
 | `tests/readonly_fixtures.rs` | 2 |
 | `tests/readonly_strace.rs` | 1 |
 | `tests/report_golden.rs` | 4 |

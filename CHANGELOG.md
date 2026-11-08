@@ -13,6 +13,9 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   added and removed jobs and runs whose status changed. It takes no other
   option and reads no crontab or log. Exit 0 when the reports match, 1 when
   they differ, 2 on an input error.
+- README and README.nl have a section "Aan de slag in 5 minuten".
+  `tests/readme_quickstart.rs` runs its commands literally. The measured
+  test count is 372.
 
 ## [1.0.0] - 2026-11-08
 
