@@ -1,6 +1,13 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the outgoing-connection test. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the input-limit test. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+
+### 2026-11-08 (W-46, input limit, branch prep/w24-fout)
+
+- Each named file, each crontab found by `--system-root`, each `--diff` report, and standard input may be at most 268435456 bytes (256 MiB). A larger input exits 2 with `file is larger than 268435456 bytes` and is not loaded. A `.gz` log is refused when the inflated text passes that size. The limit is new. The measured 100 MiB input stays under it. The over-limit file is created in `/tmp` by the test and is not committed. Exit codes stay 0, 1, 2 and 3.
+- `cargo test --no-fail-fast`: 412 passed / 0 failed / 0 ignored.
+- `cargo fmt --check`: clean. `cargo clippy --all-targets -- -D warnings`: clean.
+- Version stays 1.0.0. `rust-version` stays 1.85.
 
 ### 2026-11-08 (W-45, sample audit with outgoing connections blocked, branch prep/w24-fout)
 
@@ -23,7 +30,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 ### `cargo test`
 
-411 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran.
+412 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran. The over-limit test ran.
 
 | Suite | Passed |
 | --- | ---: |
@@ -36,6 +43,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 | `tests/error_messages.rs` | 24 |
 | `tests/examples_golden.rs` | 3 |
 | `tests/handbook_help.rs` | 2 |
+| `tests/input_limit.rs` | 1 |
 | `tests/json_schema.rs` | 1 |
 | `tests/ledger_golden.rs` | 20 |
 | `tests/log_golden.rs` | 11 |

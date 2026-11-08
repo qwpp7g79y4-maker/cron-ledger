@@ -252,7 +252,8 @@ earlier than
 .BR --since ,
 more than one stdin source, an argument that is not valid UTF-8, a named file that cannot be read, a named source that yields no job, a
 .B --system-root
-that is not a directory when the scan runs (or a scan that found crontab files and could read none of them), a window that would expand past 5000000 expected runs, or a report that cannot be written.
+that is not a directory when the scan runs (or a scan that found crontab files and could read none of them), a window that would expand past 5000000 expected runs, a file, a scanned crontab, a --diff report, or standard input larger than 268435456 bytes (256 MiB), or a report that cannot be written.
+The oversized input is not loaded.
 .TP
 .B 3
 No

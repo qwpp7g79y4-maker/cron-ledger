@@ -22,6 +22,7 @@ use jiff::Timestamp;
 
 use crate::cli::{Cli, InputPath};
 use crate::crontab::{self, describe_schedule, CronJob, ScheduleKind};
+use crate::input_limit::{self, explain_read, read_capped_file, read_capped_reader};
 use crate::ledger::{
     build_ledger_from_coverage, normalize_command, JobKey, JobSchedule, Ledger, LogCoverage,
     ScheduledJob,
@@ -57,20 +58,12 @@ fn resolve_timestamp(value: &str, now: Timestamp) -> Result<Timestamp, String> {
 
 fn read_text(path: &InputPath) -> Result<String, String> {
     let (bytes, name) = match path {
-        InputPath::Stdin => {
-            let mut buf = Vec::new();
-            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf).map_err(|e| {
-                format!("cannot read <stdin>: {e}; check the command that pipes into cron-ledger")
-            })?;
-            (buf, "<stdin>".to_string())
-        }
+        InputPath::Stdin => (
+            read_capped_reader(std::io::stdin()).map_err(|e| explain_read("<stdin>", &e, true))?,
+            "<stdin>".to_string(),
+        ),
         InputPath::File(p) => (
-            std::fs::read(p).map_err(|e| {
-                format!(
-                    "cannot read {}: {e}; check that the path exists and is readable",
-                    p.display()
-                )
-            })?,
+            read_capped_file(p).map_err(|e| explain_read(&p.display().to_string(), &e, false))?,
             p.display().to_string(),
         ),
     };
@@ -80,29 +73,30 @@ fn read_text(path: &InputPath) -> Result<String, String> {
 }
 
 /// Read a file found by the `--system-root` scan, with the same decoding as
-/// a named crontab.
+/// a named crontab. A file past the input limit is not loaded.
 fn read_scanned(path: &Path) -> Result<String, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let bytes = read_capped_file(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::FileTooLarge {
+            format!("file is larger than {} bytes", input_limit::MAX_INPUT_BYTES)
+        } else {
+            e.to_string()
+        }
+    })?;
     Ok(log::decode_text(bytes, false)?.text)
 }
 
 fn read_log_text(path: &InputPath) -> Result<log::LogText, String> {
     match path {
         InputPath::Stdin => {
-            let mut buf = Vec::new();
-            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf).map_err(|e| {
-                format!("cannot read <stdin>: {e}; check the command that pipes into cron-ledger")
-            })?;
+            let buf = read_capped_reader(std::io::stdin())
+                .map_err(|e| explain_read("<stdin>", &e, true))?;
             log::decode_text(buf, true).map_err(|e| {
                 format!("cannot read <stdin>: {e}; the input must be valid UTF-8 or gzip text; convert it to UTF-8 and pipe it again")
             })
         }
-        InputPath::File(p) => log::read_log_source(p).map_err(|e| {
-            format!(
-                "cannot read {}: {e}; check that the path exists and is readable",
-                p.display()
-            )
-        }),
+        InputPath::File(p) => {
+            log::read_log_source(p).map_err(|e| explain_read(&p.display().to_string(), &e, false))
+        }
     }
 }
 

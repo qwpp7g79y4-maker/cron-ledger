@@ -2,8 +2,9 @@
 //! name ends in `.gz`. Never consulted implicitly: a `.gz` file is only
 //! ever read because the caller named it explicitly on the command line.
 
-use std::io::Read;
 use std::path::Path;
+
+use crate::input_limit::{read_capped_file, read_capped_reader};
 
 /// Bytes of one log file, decoded for the parsers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,14 +99,14 @@ fn blank_nul_lines(text: &str) -> (String, usize) {
 /// Invalid UTF-8 is replaced; see [`decode_text`].
 pub fn read_log_source(path: &Path) -> std::io::Result<LogText> {
     let invalid = |msg: String| std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
-    let bytes = std::fs::read(path)?;
+    let bytes = read_capped_file(path)?;
     if path.extension().and_then(|e| e.to_str()) == Some("gz") {
         // MultiGzDecoder, not GzDecoder: some log rotation appends a new
         // gzip member to an existing file rather than recompressing it,
         // and GzDecoder reads only the first member of such a file.
-        let mut decoder = flate2::read::MultiGzDecoder::new(&bytes[..]);
-        let mut inflated = Vec::new();
-        decoder.read_to_end(&mut inflated)?;
+        // The inflated text has the same byte cap as the file on disk.
+        let decoder = flate2::read::MultiGzDecoder::new(&bytes[..]);
+        let inflated = read_capped_reader(decoder)?;
         decode_text(inflated, true).map_err(invalid)
     } else {
         decode_text(bytes, true).map_err(invalid)

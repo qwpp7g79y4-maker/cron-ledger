@@ -7,6 +7,7 @@ pub mod app;
 pub mod cli;
 pub mod crontab;
 pub mod diff;
+mod input_limit;
 pub mod ledger;
 pub mod log;
 pub mod report;

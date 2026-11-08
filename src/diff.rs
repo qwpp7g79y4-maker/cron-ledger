@@ -9,6 +9,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::input_limit::{explain_read, read_capped_file};
 use crate::report::neutralize_controls;
 
 pub struct DiffResult {
@@ -23,12 +24,8 @@ pub fn diff_files(old: &Path, new: &Path) -> Result<DiffResult, String> {
 }
 
 fn load(path: &Path) -> Result<Value, String> {
-    let bytes = std::fs::read(path).map_err(|e| {
-        format!(
-            "cannot read {}: {e}; check that the path exists and is readable",
-            path.display()
-        )
-    })?;
+    let bytes =
+        read_capped_file(path).map_err(|e| explain_read(&path.display().to_string(), &e, false))?;
     serde_json::from_slice(&bytes).map_err(|e| {
         format!(
             "{} is not a JSON report: {e}; pass a file written by cron-ledger --json",
