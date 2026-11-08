@@ -53,3 +53,15 @@ The boxes in `task.md` are still empty. C1 ticks those.
 ## Not run
 
 Fuzzing, mutation testing, `git push`, `git tag`, and `cargo publish`.
+
+## Measured: 100 MiB input (W-26, 2026-11-08)
+
+Release build (`cargo build --release`, commit `6cb6c5f`, tree clean). Input: a synthetic syslog of exactly 104857600 bytes (100 MiB), made in `/tmp` and not committed. It is the single line of `examples/sample.log` repeated, so the lines are almost identical; the last line has trailing spaces to reach the exact size. The tool read it without error and exited 0 with 1 OK.
+
+Command:
+
+```
+/usr/bin/time -f "%e s %M KB" target/release/cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --syslog /tmp/w26-in/big.log --since 2026-10-20T00:00:00Z --until 2026-10-21T00:00:00Z --tz UTC
+```
+
+Three runs, wall clock: 0.87 s, 0.87 s, 0.87 s. Peak memory (max resident set size): 348360 KB, 348444 KB, 348744 KB. These are measurements on one host with near-identical lines; real logs with varied lines may be slower. No throughput is claimed.
