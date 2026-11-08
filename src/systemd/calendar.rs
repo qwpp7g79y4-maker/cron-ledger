@@ -18,14 +18,25 @@ use std::collections::BTreeSet;
 /// no range end is given, as in systemd's `year` component).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CalComponent {
+    /// `*`: every legal value of this component.
     Any,
+    /// One or more values, ranges, or steps.
     List(Vec<CalItem>),
 }
 
+/// One item inside a [`CalComponent::List`].
+///
+/// A bare value has `end` and `step` absent. `start..end` sets `end`.
+/// `/step` sets `step`. An open-ended step, as in systemd's year
+/// component, has `step` and no `end`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalItem {
+    /// First value that matches, inclusive.
     pub start: u32,
+    /// Last value that matches, inclusive. Absent for a single value or
+    /// an open-ended step.
     pub end: Option<u32>,
+    /// Repeat distance. Absent when every value from `start` through `end` matches.
     pub step: Option<u32>,
 }
 
@@ -62,7 +73,9 @@ fn item_contains(item: &CalItem, v: u32) -> bool {
 /// `jiff::civil::Weekday::to_monday_zero_offset`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WeekdaySpec {
+    /// No weekday was written, so every day matches.
     Any,
+    /// Monday-zero offsets that match. Monday is 0 and Sunday is 6.
     Some(BTreeSet<u8>),
 }
 
@@ -75,15 +88,24 @@ impl WeekdaySpec {
     }
 }
 
+/// One parsed `OnCalendar=` expression.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemdCalendar {
+    /// Optional leading weekday list. Absent means every day.
     pub weekdays: WeekdaySpec,
+    /// Year component. `*` is [`CalComponent::Any`].
     pub year: CalComponent,
+    /// Month, 1–12.
     pub month: CalComponent,
+    /// Day of month, 1–31.
     pub day: CalComponent,
+    /// Hour, 0–23.
     pub hour: CalComponent,
+    /// Minute, 0–59.
     pub minute: CalComponent,
+    /// Second, 0–59. Omitted in the expression means 0, not every second.
     pub second: CalComponent,
+    /// Trailing IANA timezone, when the expression has one.
     pub timezone: Option<String>,
 }
 

@@ -55,7 +55,9 @@ use super::status::Status;
 /// Empty when there were no coverage timestamps at all.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct LogCoverage {
+    /// Earliest coverage timestamp across every file.
     pub first: Option<Timestamp>,
+    /// Latest coverage timestamp across every file.
     pub last: Option<Timestamp>,
     /// One closed range per input file. Absent from the JSON report.
     #[serde(skip)]
@@ -111,6 +113,7 @@ impl LogCoverage {
         self
     }
 
+    /// No coverage timestamps at all.
     pub fn is_empty(&self) -> bool {
         self.first.is_none()
     }
@@ -150,10 +153,16 @@ impl LogCoverage {
 /// The outcome of matching one expected run time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct RunOutcome {
+    /// Instant the schedule said this run should start.
     pub expected: Timestamp,
+    /// How this expected time was judged against the logs.
     pub status: Status,
+    /// Timestamp of the matched log event. Absent when nothing matched.
     pub actual: Option<Timestamp>,
+    /// How late `actual` was. Set for [`Status::Late`] and
+    /// [`Status::LateCaughtUp`]; absent otherwise.
     pub late_by: Option<Duration>,
+    /// Whether a `CMDEND` (or equivalent) was seen for the matched run.
     pub exit_status: ExitStatus,
 }
 

@@ -8,8 +8,18 @@ use serde::Serialize;
 /// reverse.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum JobKey {
-    Cron { user: String, command: String },
-    Timer { unit: String },
+    /// A cron job. `command` is the result of [`normalize_command`].
+    Cron {
+        /// User the job runs as.
+        user: String,
+        /// Command after [`normalize_command`].
+        command: String,
+    },
+    /// A timer, identified by the unit it activates.
+    Timer {
+        /// Unit name, such as `backup.service`.
+        unit: String,
+    },
 }
 
 /// Normalize a command for matching: trim the ends and unescape `\%` to

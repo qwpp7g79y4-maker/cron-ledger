@@ -18,9 +18,13 @@ use jiff::Timestamp;
 /// `None` for `-` or `n/a`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedTimer {
+    /// 1-based line in the listing file.
     pub line: usize,
+    /// UNIT column.
     pub unit: String,
+    /// LAST column. `None` for `-` or `n/a`.
     pub last: Option<Timestamp>,
+    /// NEXT column. `None` for `-` or `n/a`.
     pub next: Option<Timestamp>,
 }
 
@@ -28,7 +32,9 @@ pub struct ListedTimer {
 /// hard error; the caller decides whether zero usable rows is fatal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListTimersParse {
+    /// Data rows that parsed.
     pub timers: Vec<ListedTimer>,
+    /// Malformed rows and other notes. Not a hard error.
     pub warnings: Vec<String>,
 }
 
@@ -36,11 +42,16 @@ pub struct ListTimersParse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListedTimerVerdict {
     /// LAST is present and no NEXT was already due past `tolerance`.
-    Current { last: Timestamp },
+    Current {
+        /// LAST column of a row that is not overdue.
+        last: Timestamp,
+    },
     /// NEXT was due before `until` by more than `tolerance`, and LAST is
     /// missing or earlier than that NEXT by more than `tolerance`.
     OlderThanExpected {
+        /// LAST column, when the row has one.
         last: Option<Timestamp>,
+        /// NEXT time that was already due past the tolerance.
         expected: Timestamp,
     },
     /// Nothing to compare: no LAST, and NEXT is absent or not yet due.

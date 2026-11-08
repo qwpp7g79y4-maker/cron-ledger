@@ -12,11 +12,17 @@ use serde_json::Value;
 use crate::input_limit::{explain_read, read_capped_file};
 use crate::report::neutralize_controls;
 
+/// Text of one `--diff` and whether the two reports differ.
 pub struct DiffResult {
+    /// The comparison, one line per difference, or `no differences`.
     pub text: String,
+    /// `true` when a job was added, removed, or a matched outcome differs.
     pub changed: bool,
 }
 
+/// Load two saved `--json` reports and compare them.
+///
+/// A file past the input limit is not loaded.
 pub fn diff_files(old: &Path, new: &Path) -> Result<DiffResult, String> {
     let a = load(old)?;
     let b = load(new)?;
@@ -91,6 +97,10 @@ fn statuses(job: &Value) -> Option<BTreeMap<String, String>> {
     )
 }
 
+/// Compare two parsed `--json` reports.
+///
+/// Both must have `schema_version` 1 and a `jobs` list. Jobs are matched
+/// by `key`, in file order when a key occurs more than once.
 pub fn diff_reports(old: &Value, new: &Value) -> Result<DiffResult, String> {
     check(old, "OLD")?;
     check(new, "NEW")?;

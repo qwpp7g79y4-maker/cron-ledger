@@ -28,7 +28,9 @@ pub enum JobSchedule {
     /// the NEXT time when that elapse was due and LAST is older than it;
     /// `last` is the LAST column, shown as the report's last run.
     ListedTimer {
+        /// LAST column, shown as the report's last run.
         last: Option<Timestamp>,
+        /// NEXT time that was already due, when LAST is older than it.
         overdue: Option<Timestamp>,
     },
 }
@@ -37,14 +39,19 @@ pub enum JobSchedule {
 /// resolved schedule and tolerance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduledJob {
+    /// Identity used to match log events to this job.
     pub key: JobKey,
+    /// Source file the job was read from.
     pub file: String,
+    /// 1-based line in `file`.
     pub line: usize,
+    /// What the schedule resolved to inside the audit window.
     pub schedule: JobSchedule,
+    /// How far a log event may sit from an expected time and still match.
     pub tolerance: Duration,
     /// A systemd timer's `Persistent=`; always `false` for cron jobs,
-    /// which have no such concept. Drives `LATE (caught up)` via
-    /// [`apply_persistent_catchup`].
+    /// which have no such concept. When true, a run missed while the
+    /// machine was down and caught up after boot is `LATE (caught up)`.
     pub persistent: bool,
     /// First firing at or after the audit window, when a crontab schedule
     /// is known. Caps the late search so a run of that later firing is not
@@ -56,26 +63,37 @@ pub struct ScheduledJob {
 /// What a job's ledger entry ended up as.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum JobOutcome {
+    /// One outcome per expected time, in schedule order.
     Standard(Vec<RunOutcome>),
     /// All boots found in the given events, for info only; not matched
     /// against any schedule or tolerance.
     Reboot {
+        /// Boot timestamps found in the logs.
         boots: Vec<Timestamp>,
     },
+    /// The timer has only monotonic triggers, so no expected times exist.
     UnsupportedTrigger,
 }
 
+/// One job in the finished ledger.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct JobLedgerEntry {
+    /// Identity used to match log events to this job.
     pub key: JobKey,
+    /// Source file the job was read from.
     pub file: String,
+    /// 1-based line in `file`.
     pub line: usize,
+    /// What matching decided for this job.
     pub outcome: JobOutcome,
 }
 
+/// Every job's outcome, plus the span the logs cover.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Ledger {
+    /// One entry per scheduled job, in input order.
     pub entries: Vec<JobLedgerEntry>,
+    /// Closed spans the logs actually cover. A hole between files is not covered.
     pub log_coverage: LogCoverage,
     /// Notes from building the ledger. Includes a shared-command
     /// assignment warning when several jobs normalize to one key, and,
@@ -188,8 +206,8 @@ pub fn build_ledger(jobs: &[ScheduledJob], events: &[LogEvent]) -> Ledger {
 ///
 /// Jobs that normalize to the same [`JobKey`] (the same cron command
 /// scheduled more than once, say from two files) are matched together
-/// against one shared pool of observed runs, via [`match_shared_runs`],
-/// so a single real execution cannot be counted as a hit for more than
+/// against one shared pool of observed runs, so a single real execution
+/// cannot be counted as a hit for more than
 /// one of them. That shared match is still the same greedy
 /// nearest-match heuristic as a single job's, not an optimal
 /// assignment, so which schedule line claims a given run among several

@@ -9,6 +9,8 @@ use crate::input_limit::{read_capped_file, read_capped_reader};
 /// Bytes of one log file, decoded for the parsers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogText {
+    /// The file as text. Invalid UTF-8 bytes are replaced when the caller
+    /// asked for a lossy decode.
     pub text: String,
     /// Byte offset of the first byte that was not valid UTF-8.
     /// Those bytes are replaced; the rest of the file is kept.
@@ -96,7 +98,8 @@ fn blank_nul_lines(text: &str) -> (String, usize) {
 }
 
 /// Read `path` as text, gunzipping it first if its extension is `gz`.
-/// Invalid UTF-8 is replaced; see [`decode_text`].
+/// Invalid UTF-8 is replaced and reported on [`LogText::invalid_utf8_at`].
+/// A file past the input limit is not loaded.
 pub fn read_log_source(path: &Path) -> std::io::Result<LogText> {
     let invalid = |msg: String| std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
     let bytes = read_capped_file(path)?;

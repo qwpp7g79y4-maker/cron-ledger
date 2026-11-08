@@ -31,14 +31,23 @@ use crate::log::{self, LogEvent};
 use crate::schedule::{self, default_timezone, resolve_timezone};
 use crate::systemd;
 
+/// One finished audit: the ledger, the window it covers, and warnings
+/// from reading inputs.
 #[derive(Debug)]
 pub struct Audit {
+    /// Matched jobs and the span the logs actually cover.
     pub ledger: Ledger,
+    /// Human-readable schedule text for each job, for the report.
     pub descriptions: HashMap<JobKey, String>,
+    /// Warnings from reading inputs, in addition to `ledger.warnings`.
     pub extra_warnings: Vec<String>,
+    /// Inclusive start of the audit window.
     pub since: Timestamp,
+    /// Exclusive end of the audit window.
     pub until: Timestamp,
+    /// Timezone used to display times.
     pub tz: TimeZone,
+    /// Base matching tolerance from `--tolerance`, before a timer widens it.
     pub tolerance: Duration,
 }
 
@@ -393,7 +402,9 @@ fn collect_files(
 /// a path or a warning can never pass for a separate message.
 #[derive(Debug)]
 pub struct BuildError {
+    /// The one-line failure. Printed first.
     pub message: String,
+    /// Extra lines the caller prints under `message`.
     pub details: Vec<String>,
 }
 

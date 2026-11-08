@@ -22,6 +22,7 @@ use jiff::Timestamp;
 
 use crate::ledger::{JobKey, JobOutcome, Ledger, Status};
 
+/// `schema_version` written by `--json`. This release writes 1.
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Everything the report renderers need beyond the [`Ledger`] itself:
@@ -29,10 +30,15 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// (kept out of the `ledger` module's own types so the ledger tests
 /// and golden files don't need to change shape for a display concern).
 pub struct ReportContext<'a> {
+    /// Inclusive start of the audit window.
     pub since: Timestamp,
+    /// Exclusive end of the audit window.
     pub until: Timestamp,
+    /// Timezone used to display times.
     pub tz: &'a TimeZone,
+    /// Base matching tolerance from `--tolerance`.
     pub tolerance: Duration,
+    /// Human-readable schedule text for each job.
     pub descriptions: &'a HashMap<JobKey, String>,
     /// Parse/log warnings collected during input reading, in addition to
     /// `ledger.warnings`.

@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 
+/// How one expected run, or a whole `@reboot` or unsupported timer, was judged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Status {
     /// A matching event was found within tolerance.

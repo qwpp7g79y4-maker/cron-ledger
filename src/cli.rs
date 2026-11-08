@@ -10,11 +10,14 @@ use crate::systemd::parse_duration;
 /// One `PATH|-` input argument.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputPath {
+    /// `-`: read this source from standard input.
     Stdin,
+    /// A filesystem path.
     File(PathBuf),
 }
 
 impl InputPath {
+    /// `<stdin>`, or the path as displayed.
     pub fn label(&self) -> String {
         match self {
             InputPath::Stdin => "<stdin>".to_string(),
@@ -31,20 +34,34 @@ fn parse_input_path(raw: &str) -> InputPath {
     }
 }
 
+/// Parsed command line. Absent flags keep the [`Default`] values.
 #[derive(Debug, Clone)]
 pub struct Cli {
+    /// `--crontab PATH|-`, in the order given.
     pub crontabs: Vec<InputPath>,
+    /// `--crontab-user USER=PATH`.
     pub crontab_users: Vec<(String, InputPath)>,
+    /// `--system-root`. The default is `/`.
     pub system_root: PathBuf,
+    /// `--timer-unit PATH`.
     pub timer_units: Vec<InputPath>,
+    /// `--timers-list PATH|-`.
     pub timers_list: Vec<InputPath>,
+    /// `--syslog PATH|-`.
     pub syslogs: Vec<InputPath>,
+    /// `--journal-json PATH|-`.
     pub journal_json: Vec<InputPath>,
+    /// `--since`, still the raw RFC3339 timestamp or duration text.
     pub since: String,
+    /// `--until`, when passed. Same shape as `since`.
     pub until: Option<String>,
+    /// `--tz`, when passed. Absent means the system timezone.
     pub tz: Option<String>,
+    /// `--tolerance`. The default is 5 minutes.
     pub tolerance: Duration,
+    /// `--json`.
     pub json: bool,
+    /// `--csv`.
     pub csv: bool,
     /// `--output PATH`: write the report to this file instead of stdout.
     pub output: Option<PathBuf>,
@@ -54,7 +71,9 @@ pub struct Cli {
     pub quiet: bool,
     /// `--verbose`: print the usage text after an error, and on success one context line.
     pub verbose: bool,
+    /// `-h` or `--help`.
     pub help: bool,
+    /// `-V` or `--version`.
     pub version: bool,
 }
 
@@ -227,6 +246,7 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
     Ok(cli)
 }
 
+/// Usage text printed for `--help` and after a usage error.
 pub fn usage() -> &'static str {
     "cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root DIR]\n\
      \x20           [--timer-unit PATH]... [--timers-list PATH|-]...\n\
