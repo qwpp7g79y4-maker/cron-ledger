@@ -1,6 +1,6 @@
 use std::io::{self, IsTerminal, Write};
 
-use cron_ledger::{app, cli, report};
+use cron_ledger::{app, cli, diff, report};
 
 /// Write the whole report. `print!` / `println!` panic when this fails
 /// (a full disk, for example), which exits 101. A failed report is an
@@ -62,6 +62,18 @@ fn main() {
         return;
     }
 
+    if let Some((old, new)) = &parsed.diff {
+        match diff::diff_files(old, new) {
+            Ok(result) => {
+                if let Err(e) = write_stdout(&result.text) {
+                    report_write_error(e);
+                }
+                std::process::exit(if result.changed { 1 } else { 0 });
+            }
+            Err(message) => fail(&message),
+        }
+    }
+
     let now = jiff::Timestamp::now();
     let audit = match app::build(&parsed, now) {
         Ok(a) => a,
@@ -86,7 +98,9 @@ fn main() {
     };
     let code = report::exit_code(&audit.ledger);
 
-    let rendered = if parsed.json {
+    let rendered = if parsed.csv {
+        report::render_csv(&audit.ledger, &ctx)
+    } else if parsed.json {
         let mut text = report::render_json(&audit.ledger, &ctx);
         text.push('\n');
         text

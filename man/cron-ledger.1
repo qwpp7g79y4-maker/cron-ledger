@@ -7,7 +7,8 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
-            [--tolerance 5m] [--json] [-h | --help]
+            [--tolerance 5m] [--json | --csv] [-h | --help]
+cron-ledger --diff OLD.json NEW.json
 .fi
 .SH DESCRIPTION
 cron-ledger reads saved crontab files and systemd timer units, works out when each job should have run in a time window, and compares that with a saved syslog or journal.
@@ -190,6 +191,18 @@ An event later than that is
 Write the report as one JSON document
 .RI ( schema_version
 1) instead of the text report.
+.TP
+.B --csv
+Write the report as CSV (RFC 4180, one row per audited run) instead of the text report.
+Cannot be combined with
+.BR --json .
+.TP
+.B --diff \fIOLD.json\fR \fINEW.json\fR
+Compare two saved
+.B --json
+reports and list added and removed jobs and runs whose status changed.
+Takes no other option and reads no crontab or log.
+Exit 0 when the reports match, 1 when they differ, 2 on an input error.
 .SH EXIT STATUS
 .TP
 .B 0

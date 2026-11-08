@@ -32,7 +32,8 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--timer-unit PATH]... [--timers-list PATH|-]...
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
-            [--tolerance 5m] [--json] [-h | --help]
+            [--tolerance 5m] [--json | --csv] [-h | --help]
+cron-ledger --diff OLD.json NEW.json
 ```
 
 The manual page is [man/cron-ledger.1](man/cron-ledger.1).
@@ -186,6 +187,8 @@ full output is in `examples/backup.expected.txt`; the second example,
 | `--tz ZONE` | IANA timezone for expansion and zone-less log lines, e.g. `Europe/Amsterdam`. Default: system zone, else UTC. |
 | `--tolerance SPAN` | How late an event may be and still be `OK`. Default `5m`. |
 | `--json` | Write one JSON document instead of the text report. |
+| `--csv` | Write CSV, one row per audited run. Not combinable with `--json`. |
+| `--diff OLD.json NEW.json` | Compare two saved `--json` reports; takes no other option. Exit 0 identical, 1 different, 2 input error. |
 | `-h`, `--help` | Print the usage text and exit 0. |
 
 `-` means stdin; at most one source across all options may be stdin.

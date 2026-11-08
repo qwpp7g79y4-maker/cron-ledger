@@ -5,6 +5,9 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `--csv`: CSV export of the report.
+- `--diff OLD.json NEW.json`: compare two `--json` reports.
+
 ## [1.0.0] - 2026-11-08
 
 The previous version is 0.2.0.

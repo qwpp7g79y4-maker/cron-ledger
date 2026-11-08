@@ -45,6 +45,9 @@ pub struct Cli {
     pub tz: Option<String>,
     pub tolerance: Duration,
     pub json: bool,
+    pub csv: bool,
+    /// `--diff OLD NEW`: compare two saved `--json` reports.
+    pub diff: Option<(PathBuf, PathBuf)>,
     pub help: bool,
     pub version: bool,
 }
@@ -64,6 +67,8 @@ impl Default for Cli {
             tz: None,
             tolerance: Duration::from_secs(300),
             json: false,
+            csv: false,
+            diff: None,
             help: false,
             version: false,
         }
@@ -97,6 +102,12 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
             "-h" | "--help" => cli.help = true,
             "-V" | "--version" => cli.version = true,
             "--json" => cli.json = true,
+            "--csv" => cli.csv = true,
+            "--diff" => {
+                let old = next_value(&mut args, "--diff")?;
+                let new = next_value(&mut args, "--diff")?;
+                cli.diff = Some((PathBuf::from(old), PathBuf::from(new)));
+            }
             "--crontab" => {
                 let p = parse_input_path(next_value(&mut args, "--crontab")?);
                 count_stdin(&p);
@@ -162,6 +173,18 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
     if cli.help || cli.version {
         return Ok(cli);
     }
+    if cli.diff.is_some() {
+        if raw_args.len() != 3 {
+            return Err(
+                "--diff takes exactly two report files and no other option: cron-ledger --diff OLD.json NEW.json"
+                    .to_string(),
+            );
+        }
+        return Ok(cli);
+    }
+    if cli.json && cli.csv {
+        return Err("--json and --csv cannot be combined; pick one output format".to_string());
+    }
     if !since_set {
         return Err(
             "--since is required: say how far back to audit, for example --since 30d".to_string(),
@@ -181,7 +204,8 @@ pub fn usage() -> &'static str {
      \x20           [--timer-unit PATH]... [--timers-list PATH|-]...\n\
      \x20           [--syslog PATH|-]... [--journal-json PATH|-]...\n\
      \x20           --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]\n\
-     \x20           [--tolerance 5m] [--json] [-h | --help]\n"
+     \x20           [--tolerance 5m] [--json | --csv] [-h | --help]\n\
+     cron-ledger --diff OLD.json NEW.json\n"
 }
 
 #[cfg(test)]
@@ -294,6 +318,29 @@ mod tests {
     fn help_short_circuits_since_requirement() {
         let cli = parse(&args(&["--help"])).unwrap();
         assert!(cli.help);
+    }
+
+    #[test]
+    fn csv_flag_is_parsed_and_excludes_json() {
+        assert!(parse(&args(&["--since", "30d", "--csv"])).unwrap().csv);
+        let err = parse(&args(&["--since", "30d", "--csv", "--json"])).unwrap_err();
+        assert!(err.contains("--csv"));
+    }
+
+    #[test]
+    fn diff_takes_two_paths_and_needs_no_since() {
+        let cli = parse(&args(&["--diff", "a.json", "b.json"])).unwrap();
+        assert_eq!(
+            cli.diff,
+            Some((PathBuf::from("a.json"), PathBuf::from("b.json")))
+        );
+    }
+
+    #[test]
+    fn diff_with_one_path_or_extra_options_is_an_error() {
+        assert!(parse(&args(&["--diff", "a.json"])).is_err());
+        assert!(parse(&args(&["--diff", "a.json", "b.json", "--json"])).is_err());
+        assert!(parse(&args(&["--since", "30d", "--diff", "a.json", "b.json"])).is_err());
     }
 
     #[test]

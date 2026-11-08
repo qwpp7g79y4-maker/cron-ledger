@@ -6,9 +6,11 @@
 //! NO_TRACE and otherwise OK. Exit 3 is the 0.2.0 contract. A `--fail-on`
 //! flag is not part of this release.
 
+mod csv;
 mod json;
 mod text;
 
+pub use csv::render_csv;
 pub use json::render_json;
 pub use text::render_text;
 
