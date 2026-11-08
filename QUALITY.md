@@ -65,3 +65,11 @@ Command:
 ```
 
 Three runs, wall clock: 0.87 s, 0.87 s, 0.87 s. Peak memory (max resident set size): 348360 KB, 348444 KB, 348744 KB. These are measurements on one host with near-identical lines; real logs with varied lines may be slower. No throughput is claimed.
+
+## Measured: line coverage (W-28, 2026-11-08)
+
+Line coverage: 96.55% (7005 lines, 242 missed), as printed in the TOTAL row of `cargo llvm-cov --ignore-run-fail`. Measured on 2026-11-08 on branch `prep/w24-fout`. Goal was above 90%; no tests were added to reach it.
+
+Command: `PATH="$HOME/.cargo/bin:$PATH" cargo llvm-cov --ignore-run-fail`
+
+Caveat: under `cargo llvm-cov` the test `readonly_strace::strace_sees_no_network_calls_and_no_write_capable_openat` fails, because the instrumented binary itself opens a `.profraw` file for writing, which the test flags. That is an artefact of instrumentation, so `--ignore-run-fail` was needed to get the report. In a plain `cargo test --no-fail-fast` run it passes. The existing test count above is left as it was.
