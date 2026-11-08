@@ -28,7 +28,9 @@ pub fn default_timezone() -> TimeZone {
 /// A crontab `TZ=` line is the job's own environment, not a schedule
 /// timezone, so callers do not pass it here.
 pub fn resolve_timezone(name: &str) -> Result<TimeZone, String> {
-    TimeZone::get(name).map_err(|e| format!("unknown timezone '{name}': {e}"))
+    TimeZone::get(name).map_err(|e| {
+        format!("unknown timezone '{name}': {e}; use an IANA name such as Europe/Amsterdam or UTC")
+    })
 }
 
 fn field_values(field: &Field, min: u32, max: u32) -> Vec<u32> {

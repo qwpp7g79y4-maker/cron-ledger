@@ -23,9 +23,18 @@ pub fn diff_files(old: &Path, new: &Path) -> Result<DiffResult, String> {
 }
 
 fn load(path: &Path) -> Result<Value, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| format!("{} is not a JSON report: {e}", path.display()))
+    let bytes = std::fs::read(path).map_err(|e| {
+        format!(
+            "cannot read {}: {e}; check that the path exists and is readable",
+            path.display()
+        )
+    })?;
+    serde_json::from_slice(&bytes).map_err(|e| {
+        format!(
+            "{} is not a JSON report: {e}; pass a file written by cron-ledger --json",
+            path.display()
+        )
+    })
 }
 
 fn label(key: &Value) -> String {
@@ -48,12 +57,14 @@ fn check(report: &Value, which: &str) -> Result<(), String> {
         Some(1) => {}
         other => {
             return Err(format!(
-                "{which} report has schema_version {other:?}, expected 1"
+                "{which} report has schema_version {other:?}, expected 1; regenerate it with this cron-ledger version using --json"
             ))
         }
     }
     if report.get("jobs").and_then(Value::as_array).is_none() {
-        return Err(format!("{which} report has no \"jobs\" list"));
+        return Err(format!(
+            "{which} report has no \"jobs\" list; pass a file written by cron-ledger --json"
+        ));
     }
     Ok(())
 }

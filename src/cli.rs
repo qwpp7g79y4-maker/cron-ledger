@@ -84,6 +84,12 @@ fn next_value<'a>(
         .ok_or_else(|| format!("{flag} requires a value; run cron-ledger --help for the syntax"))
 }
 
+fn crontab_user_error(v: &str) -> String {
+    format!(
+        "--crontab-user expects USER=PATH, got '{v}'; name the user, then the file, for example --crontab-user alice=/path/to/crontab"
+    )
+}
+
 /// Parse CLI arguments (everything after the binary name).
 pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
     let mut cli = Cli::default();
@@ -115,11 +121,9 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
             }
             "--crontab-user" => {
                 let v = next_value(&mut args, "--crontab-user")?;
-                let (user, path) = v
-                    .split_once('=')
-                    .ok_or_else(|| format!("--crontab-user expects USER=PATH, got '{v}'"))?;
+                let (user, path) = v.split_once('=').ok_or_else(|| crontab_user_error(v))?;
                 if user.is_empty() {
-                    return Err(format!("--crontab-user expects USER=PATH, got '{v}'"));
+                    return Err(crontab_user_error(v));
                 }
                 let p = parse_input_path(path);
                 count_stdin(&p);
@@ -160,7 +164,9 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
             }
             "--tolerance" => {
                 let v = next_value(&mut args, "--tolerance")?;
-                cli.tolerance = parse_duration(v).map_err(|e| format!("--tolerance: {e}"))?;
+                cli.tolerance = parse_duration(v).map_err(|e| {
+                    format!("--tolerance: {e}; use a time span such as 90s or 5min")
+                })?;
             }
             other => {
                 return Err(format!(

@@ -49,9 +49,10 @@ fn resolve_timestamp(value: &str, now: Timestamp) -> Result<Timestamp, String> {
         return Ok(ts);
     }
     let ago = systemd::parse_duration(value)
-        .map_err(|_| format!("'{value}' is not an RFC3339 timestamp or a duration like '30d'"))?;
-    now.checked_sub(ago)
-        .map_err(|e| format!("'{value}' is out of range: {e}"))
+        .map_err(|_| format!("'{value}' is not an RFC3339 timestamp or a duration like '30d'; try --since 30d or --since 2026-01-01T00:00:00Z"))?;
+    now.checked_sub(ago).map_err(|e| {
+        format!("'{value}' is out of range: {e}; use a shorter duration or an RFC3339 timestamp")
+    })
 }
 
 fn read_text(path: &InputPath) -> Result<String, String> {
@@ -74,7 +75,7 @@ fn read_text(path: &InputPath) -> Result<String, String> {
         ),
     };
     Ok(log::decode_text(bytes, false)
-        .map_err(|e| format!("cannot read {name}: {e}; the input must be valid UTF-8 text"))?
+        .map_err(|e| format!("cannot read {name}: {e}; the input must be valid UTF-8 text; convert it first, for example with iconv -f UTF-16 -t UTF-8"))?
         .text)
 }
 
@@ -93,7 +94,7 @@ fn read_log_text(path: &InputPath) -> Result<log::LogText, String> {
                 format!("cannot read <stdin>: {e}; check the command that pipes into cron-ledger")
             })?;
             log::decode_text(buf, true).map_err(|e| {
-                format!("cannot read <stdin>: {e}; the input must be valid UTF-8 or gzip text")
+                format!("cannot read <stdin>: {e}; the input must be valid UTF-8 or gzip text; convert it to UTF-8 and pipe it again")
             })
         }
         InputPath::File(p) => log::read_log_source(p).map_err(|e| {
@@ -250,6 +251,7 @@ impl Collector {
                 rejected[0]
             ));
         }
+        msg.push_str("; check that this is a crontab with at least one schedule line");
         Err(msg)
     }
 
@@ -589,7 +591,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
         } else if scanned_files == 0 {
             return Err(BuildError {
                 message: format!(
-                    "--system-root {}: no jobs found (no readable crontab file)",
+                    "--system-root {}: no jobs found (no readable crontab file); fix the permissions listed below or pass a crontab with --crontab",
                     root.display()
                 ),
                 details: c.warnings.clone(),
@@ -604,7 +606,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
         if timer.on_calendar.is_empty() && timer.unsupported_triggers.is_empty() {
             let why = timer.warnings.first().map(|w| format!(", first: {w}"));
             return Err(format!(
-                "{label}: no jobs found (no OnCalendar= or other trigger in a [Timer] section{})",
+                "{label}: no jobs found (no OnCalendar= or other trigger in a [Timer] section{}); pass a .timer unit file",
                 why.unwrap_or_default()
             )
             .into());
@@ -703,7 +705,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
             }
             if !any_calendar_parsed && timer.unsupported_triggers.is_empty() {
                 return Err(format!(
-                    "{label}: no jobs found (no valid OnCalendar=, first: {})",
+                    "{label}: no jobs found (no valid OnCalendar=, first: {}); fix the OnCalendar= value in the unit",
                     first_calendar_error.unwrap_or_default()
                 )
                 .into());
@@ -780,7 +782,9 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
         }
         if c.jobs.len() == before {
             return Err(BuildError {
-                message: format!("{label}: no jobs found"),
+                message: format!(
+                    "{label}: no jobs found; pass the output of systemctl list-timers --all"
+                ),
                 details: file_warnings,
             });
         }
@@ -858,10 +862,13 @@ mod tests {
     fn resolve_timestamp_rejects_garbage() {
         let now = ts("2026-10-22T00:00:00Z");
         let err = resolve_timestamp("banana", now).unwrap_err();
-        assert_eq!(
-            err,
-            "'banana' is not an RFC3339 timestamp or a duration like '30d'"
+        // The documented sentence stays the start of the message; the
+        // next step follows it.
+        assert!(
+            err.starts_with("'banana' is not an RFC3339 timestamp or a duration like '30d'"),
+            "{err}"
         );
+        assert!(err.contains("try --since 30d"), "{err}");
     }
 
     #[test]
