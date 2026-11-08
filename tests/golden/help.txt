@@ -4,3 +4,6 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
             [--tolerance 5m] [--json | --csv] [--output PATH] [--quiet | --verbose] [-h | --help]
 cron-ledger --diff OLD.json NEW.json
+cron-ledger --next <RFC3339> --tz <UTC|Europe/Amsterdam> [--crontab PATH|-]...
+            [--crontab-user USER=PATH]... [--timer-unit PATH]... [--output PATH]
+            [--quiet | --verbose]

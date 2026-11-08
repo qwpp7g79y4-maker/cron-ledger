@@ -67,6 +67,9 @@ pub struct Cli {
     pub output: Option<PathBuf>,
     /// `--diff OLD NEW`: compare two saved `--json` reports.
     pub diff: Option<(PathBuf, PathBuf)>,
+    /// `--next RFC3339`: preview the next run at or after this instant.
+    /// The value is the caller's time. A duration is not accepted.
+    pub next: Option<String>,
     /// `--quiet`: hide the usage text after an error. No context line.
     pub quiet: bool,
     /// `--verbose`: print the usage text after an error, and on success one context line.
@@ -95,6 +98,7 @@ impl Default for Cli {
             csv: false,
             output: None,
             diff: None,
+            next: None,
             quiet: false,
             verbose: false,
             help: false,
@@ -122,6 +126,7 @@ fn crontab_user_error(v: &str) -> String {
 pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
     let mut cli = Cli::default();
     let mut since_set = false;
+    let mut tolerance_set = false;
     let mut stdin_uses = 0usize;
 
     let mut count_stdin = |p: &InputPath| {
@@ -146,6 +151,9 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
                 let old = next_value(&mut args, "--diff")?;
                 let new = next_value(&mut args, "--diff")?;
                 cli.diff = Some((PathBuf::from(old), PathBuf::from(new)));
+            }
+            "--next" => {
+                cli.next = Some(next_value(&mut args, "--next")?.to_string());
             }
             "--crontab" => {
                 let p = parse_input_path(next_value(&mut args, "--crontab")?);
@@ -200,6 +208,7 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
                 cli.tolerance = parse_duration(v).map_err(|e| {
                     format!("--tolerance: {e}; use a time span such as 90s or 5min")
                 })?;
+                tolerance_set = true;
             }
             other => {
                 return Err(format!(
@@ -214,6 +223,9 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
     }
     if cli.quiet && cli.verbose {
         return Err("--quiet and --verbose cannot be combined; pick one".to_string());
+    }
+    if let Some(at) = cli.next.clone() {
+        return finish_next(cli, &at, since_set, tolerance_set, stdin_uses);
     }
     if cli.diff.is_some() {
         // `--quiet` and `--verbose` do not change the comparison.
@@ -246,6 +258,71 @@ pub fn parse(raw_args: &[String]) -> Result<Cli, String> {
     Ok(cli)
 }
 
+/// Reject an audit flag on a next-run preview, then require an absolute
+/// instant and an explicit timezone. A duration would be counted from the
+/// machine clock, so it is not a legal `--next` value.
+fn finish_next(
+    cli: Cli,
+    at: &str,
+    since_set: bool,
+    tolerance_set: bool,
+    stdin_uses: usize,
+) -> Result<Cli, String> {
+    if stdin_uses > 1 {
+        return Err(format!(
+            "at most one source may read from stdin ('-'), got {stdin_uses}; save the others to files and pass their paths"
+        ));
+    }
+    if cli.diff.is_some() {
+        return Err(
+            "--next cannot be combined with --diff; preview the next run, or compare two reports"
+                .to_string(),
+        );
+    }
+    if since_set {
+        return Err(
+            "--next does not use --since; the instant is the --next value, for example --next 2026-10-20T00:00:00Z"
+                .to_string(),
+        );
+    }
+    if cli.until.is_some() {
+        return Err(
+            "--next does not use --until; the instant is the --next value, for example --next 2026-10-20T00:00:00Z"
+                .to_string(),
+        );
+    }
+    if !cli.syslogs.is_empty() || !cli.journal_json.is_empty() || !cli.timers_list.is_empty() {
+        return Err(
+            "--next reads schedules only; drop --syslog, --journal-json and --timers-list"
+                .to_string(),
+        );
+    }
+    if cli.json || cli.csv {
+        return Err("--next prints a text preview; drop --json and --csv".to_string());
+    }
+    if tolerance_set {
+        return Err(
+            "--next does not use --tolerance; it prints the next time, not a late/OK check"
+                .to_string(),
+        );
+    }
+    if at.parse::<jiff::Timestamp>().is_err() {
+        return Err(format!(
+            "'{at}' is not an RFC3339 timestamp; --next takes the instant from you, for example --next 2026-10-20T00:00:00Z"
+        ));
+    }
+    match cli.tz.as_deref() {
+        Some(name) if !name.is_empty() => {}
+        _ => {
+            return Err(
+                "--next needs an explicit --tz, for example --tz UTC or --tz Europe/Amsterdam"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(cli)
+}
+
 /// Usage text printed for `--help` and after a usage error.
 pub fn usage() -> &'static str {
     "cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root DIR]\n\
@@ -253,7 +330,10 @@ pub fn usage() -> &'static str {
      \x20           [--syslog PATH|-]... [--journal-json PATH|-]...\n\
      \x20           --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]\n\
      \x20           [--tolerance 5m] [--json | --csv] [--output PATH] [--quiet | --verbose] [-h | --help]\n\
-     cron-ledger --diff OLD.json NEW.json\n"
+     cron-ledger --diff OLD.json NEW.json\n\
+     cron-ledger --next <RFC3339> --tz <UTC|Europe/Amsterdam> [--crontab PATH|-]...\n\
+     \x20           [--crontab-user USER=PATH]... [--timer-unit PATH]... [--output PATH]\n\
+     \x20           [--quiet | --verbose]\n"
 }
 
 #[cfg(test)]
@@ -402,6 +482,47 @@ mod tests {
     #[test]
     fn usage_shows_until_accepts_rfc3339_or_a_duration() {
         assert!(usage().contains("--until <RFC3339|30d>"));
+    }
+
+    #[test]
+    fn next_takes_an_rfc3339_instant_and_an_explicit_timezone() {
+        let cli = parse(&args(&[
+            "--next",
+            "2026-10-20T03:00:00Z",
+            "--tz",
+            "Europe/Amsterdam",
+            "--crontab",
+            "examples/sample.crontab",
+        ]))
+        .unwrap();
+        assert_eq!(cli.next.as_deref(), Some("2026-10-20T03:00:00Z"));
+        assert_eq!(cli.tz.as_deref(), Some("Europe/Amsterdam"));
+        assert!(cli.since.is_empty());
+    }
+
+    #[test]
+    fn next_rejects_a_duration_a_missing_zone_and_an_audit_flag() {
+        let duration = parse(&args(&["--next", "30d", "--tz", "UTC"])).unwrap_err();
+        assert!(duration.contains("not an RFC3339 timestamp"), "{duration}");
+        assert!(
+            duration.contains("--next 2026-10-20T00:00:00Z"),
+            "{duration}"
+        );
+
+        let zone = parse(&args(&["--next", "2026-10-20T00:00:00Z"])).unwrap_err();
+        assert!(zone.contains("--tz UTC"), "{zone}");
+        assert!(zone.contains("Europe/Amsterdam"), "{zone}");
+
+        let since = parse(&args(&[
+            "--next",
+            "2026-10-20T00:00:00Z",
+            "--tz",
+            "UTC",
+            "--since",
+            "30d",
+        ]))
+        .unwrap_err();
+        assert!(since.contains("does not use --since"), "{since}");
     }
 
     #[test]

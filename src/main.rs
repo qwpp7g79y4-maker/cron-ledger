@@ -241,6 +241,32 @@ fn main() {
         finish(0);
     }
 
+    if let Some(at) = parsed.next.clone() {
+        match app::preview(&parsed, &at) {
+            Ok(done) => {
+                publish(parsed.output.as_deref(), &done.text);
+                if parsed.verbose {
+                    let _ = writeln!(
+                        io::stderr(),
+                        "context: jobs {}, warnings {}",
+                        done.jobs,
+                        done.warnings
+                    );
+                }
+                finish(0);
+            }
+            Err(e) => {
+                let details = e.details.iter().fold(String::new(), |mut acc, d| {
+                    acc.push_str("  - ");
+                    acc.push_str(&report::neutralize_controls(d));
+                    acc.push('\n');
+                    acc
+                });
+                fail_with(&e.message, &details)
+            }
+        }
+    }
+
     if let Some((old, new)) = &parsed.diff {
         match diff::diff_files(old, new) {
             Ok(result) => {

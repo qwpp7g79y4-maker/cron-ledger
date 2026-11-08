@@ -49,6 +49,9 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
             [--tolerance 5m] [--json | --csv] [-h | --help]
 cron-ledger --diff OLD.json NEW.json
+cron-ledger --next <RFC3339> --tz <UTC|Europe/Amsterdam> [--crontab PATH|-]...
+            [--crontab-user USER=PATH]... [--timer-unit PATH]... [--output PATH]
+            [--quiet | --verbose]
 ```
 
 The manual page is [man/cron-ledger.1](man/cron-ledger.1).
@@ -199,7 +202,8 @@ full output is in `examples/backup.expected.txt`; the second example,
 | `--journal-json PATH\|-` | A saved `journalctl -o json` export. Repeatable. |
 | `--since <RFC3339\|30d>` | Start of the window. Required. |
 | `--until <RFC3339\|30d>` | End of the window (half-open). Default: now. |
-| `--tz ZONE` | IANA timezone for expansion and zone-less log lines, e.g. `Europe/Amsterdam`. Default: system zone, else UTC. |
+| `--tz ZONE` | IANA timezone for expansion and zone-less log lines, e.g. `Europe/Amsterdam`. Default: system zone, else UTC. Required with `--next`. |
+| `--next <RFC3339>` | Next run of each named crontab or timer at or after this instant, printed in `--tz`. A duration is rejected. The machine clock is not read. `--system-root` is not scanned. |
 | `--tolerance SPAN` | How late an event may be and still be `OK`. Default `5m`. |
 | `--json` | Write one JSON document instead of the text report. |
 | `--csv` | Write CSV, one row per audited run. Not combinable with `--json`. |
@@ -236,7 +240,7 @@ Each named file, each crontab found by `--system-root`, each `--diff` report, an
 
 ## What it does NOT do
 
-- No live monitoring or alerting; it is an after-the-fact analysis of a time window.
+- No live monitoring or alerting; it is an after-the-fact analysis of a time window. `--next` is not a live watch: you pass the instant, and the preview does not read the machine clock.
 - It cannot see runs when there are no logs. Coverage is one closed span per input file, from that file's first recognised line to its last, not one span stretched across every file. An expected time inside a file's span with no matching event is MISSED. One syslog that contains a line at 18 October 03:00 and a line at 22 October 03:00 still reports 19, 20 and 21 October as MISSED: those days sit inside that file. The same two lines in two files that do not meet, such as `s.2.gz` ending on the 18th and `s.1` starting on the 22nd, report those three days as NO_TRACE. A hole between files is not proof the job did not run; pass each rotation as its own `--syslog` (a file you concatenated yourself is one span). Expected times before the earliest line, after the latest line, and an empty log are NO_TRACE. In `--json`, `log_coverage.first` and `log_coverage.last` are the outer bounds across files. A time between them is MISSED only when it also falls inside some single file's span. The text report lists each file's span.
 - It does not know whether a job **succeeded**, unless cronie's CMDEND or the journal logs the exit code.
 - No anacron, fcron, Kubernetes CronJobs or macOS launchd (v1). No OnBootSec/OnUnitActiveSec.
@@ -251,7 +255,7 @@ Each named file, each crontab found by `--system-root`, each `--diff` report, an
 ## Alternatives
 
 - **Cronitor**, **healthchecks.io** (also self-hostable, open source), **Dead Man's Snitch**: heartbeat monitoring. Better for live alerts, but every job needs a ping added up front. Cronitor itself notes that cron logs don't show which jobs did *not* run: https://cronitor.io/guides/where-are-cron-logs-stored
-- `systemctl list-timers`: last and next run for timers, not for crontabs.
+- `systemctl list-timers`: last and next run for timers on a live system. cron-ledger does not run it. `--next` previews the next crontab or `OnCalendar` time from a file you pass, at an instant you pass, in an explicit `--tz` (`UTC` or `Europe/Amsterdam`).
 - `cronic`/`chronic`: mail on failure, not on a missing run.
 - Advice: use cron-ledger to find gaps after the fact, and a heartbeat service for alerting going forward.
 
@@ -270,6 +274,7 @@ none of the numbers in this README are unmeasured benchmark badges.
 | `--timers-list` reads a saved `systemctl list-timers --all` listing (LAST, NEXT, UNIT only; no `systemctl` call). The LAST timestamp is the report's last run. A NEXT already due before `--until`, past `--tolerance`, whose LAST is missing or older than that NEXT by more than `--tolerance`, is `MISSED`; otherwise the last run is `OK`. `n/a`/`-` on both columns is skipped. The check does not use logs | `src/systemd/list_timers.rs::fixture_last_runs_are_parsed`, `tests/cli_report.rs::timers_list_fixture_puts_the_last_run_in_the_report` (`tests/fixtures/systemd/list-timers.txt`) |
 | `--crontab-user USER=PATH` reads one user's crontab explicitly | `src/app.rs::crontab_user_flag_reads_a_per_user_crontab_file`, `src/cli.rs::crontab_user_splits_on_equals` |
 | Timezone- and DST-aware schedule expansion (system tz, `--tz`, per-line `CRON_TZ=`), cronie-style spring-gap/fall-fold handling for Europe/Amsterdam and America/New_York, strictly increasing output | `src/schedule.rs` unit tests (`amsterdam_*`, `new_york_*`, `times_are_strictly_increasing_for_a_busy_schedule`, the `expand_is_always_sorted_and_in_range` property test) |
+| `--next <RFC3339> --tz ZONE` prints the next run at or after that instant in that zone. The instant is the argument, not the machine clock. `UTC` and `Europe/Amsterdam` both change the result. A `CRON_TZ=` line is the schedule zone; a plain `TZ=` line is not. `--next` does not scan `--system-root` | `tests/next_preview.rs`, `src/preview.rs` (`sample_example_crosses_midnight_in_amsterdam_and_not_in_utc`, `backup_example_spring_gap_runs_once_just_after_the_amsterdam_jump`, `system_fixture_keeps_cron_tz_and_ignores_plain_tz`) (`examples/sample.crontab`, `examples/backup.crontab`, `tests/fixtures/crontab/system.crontab`, `tests/fixtures/systemd/tz-suffix.timer`) |
 | Reads systemd `.timer` units: `OnCalendar=` (`daily`, weekday ranges, `*:0/15`, explicit tz suffix), `Persistent=`, `RandomizedDelaySec=`, `AccuracySec=`, `Unit=`, cross-checked once by hand against `systemd-analyze calendar` | `tests/systemd_golden.rs` (`tests/fixtures/systemd/{daily,weekday-business,quarter-hour,tz-suffix}.timer`, `tests/fixtures/systemd/README.md`) |
 | Several timer files with the same `Unit=` keep every description, combined, and a repeated description is stored once | `src/app.rs::two_timers_sharing_a_unit_combine_their_descriptions` |
 | `Persistent=true` turns a missed-then-caught-up run into `LATE (caught up)`, not `MISSED` | `tests/systemd_golden.rs::persistent_missed_run_is_late_caught_up_not_missed` (`tests/fixtures/systemd/persistent-backup.timer`) |

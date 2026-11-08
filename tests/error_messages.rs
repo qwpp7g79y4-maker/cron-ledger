@@ -266,6 +266,60 @@ fn timers_list_without_header() {
     has(&e, "list.txt: no jobs found", "systemctl list-timers --all");
 }
 
+#[test]
+fn next_without_a_zone() {
+    let e = fails(&["--next", "2026-10-20T03:00:00Z"]);
+    has(
+        &e,
+        "--next needs an explicit --tz",
+        "--tz UTC or --tz Europe/Amsterdam",
+    );
+}
+
+#[test]
+fn next_duration_is_not_an_instant() {
+    let e = fails(&["--next", "30d", "--tz", "UTC"]);
+    has(
+        &e,
+        "'30d' is not an RFC3339 timestamp",
+        "--next 2026-10-20T00:00:00Z",
+    );
+}
+
+#[test]
+fn next_unknown_timezone() {
+    let e = fails(&[
+        "--next",
+        "2026-10-20T03:00:00Z",
+        "--tz",
+        "Not/AZone",
+        "--crontab",
+        "examples/sample.crontab",
+    ]);
+    has(
+        &e,
+        "unknown timezone 'Not/AZone'",
+        "such as Europe/Amsterdam or UTC",
+    );
+}
+
+#[test]
+fn next_does_not_scan_the_system_root() {
+    let e = fails(&[
+        "--next",
+        "2026-10-20T03:00:00Z",
+        "--tz",
+        "UTC",
+        "--system-root",
+        "/",
+    ]);
+    has(
+        &e,
+        "--next needs a crontab or a timer unit",
+        "does not scan --system-root",
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn argument_not_utf8() {

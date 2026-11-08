@@ -7,6 +7,7 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `--next <RFC3339> --tz ZONE` prints the next run of each named crontab or timer unit at or after that instant, in that timezone. The instant is the argument. A duration is rejected, so the machine clock is not read. `--tz` is required. The system root is not scanned. Exit 0 when the preview is printed. An audit's exit codes stay 0, 1, 2, 3 and 130. The input limit stays 268435456 bytes.
 - `--version` and `-V` print `cron-ledger 1.0.0` and exit 0. A debug build also prints the git commit when `git rev-parse --verify HEAD` provides one. A release build prints the version only. No commit is invented when git does not provide one.
 - SIGINT exits 130. Stderr is `cron-ledger: interrupted by SIGINT`. The report is not left half-written: `--output` keeps the previous file until the new report is complete, and a signal before that writes nothing. Ordinary exit codes stay 0, 1, 2 and 3. The input limit stays 268435456 bytes.
 - Each named file, each crontab found by `--system-root`, each `--diff` report, and standard input may be at most 268435456 bytes (256 MiB). A larger input exits 2 with `file is larger than 268435456 bytes` and is not loaded. A `.gz` log is refused when the inflated text passes that size. The measured 100 MiB input stays under this limit. Exit codes stay 0, 1, 2 and 3.

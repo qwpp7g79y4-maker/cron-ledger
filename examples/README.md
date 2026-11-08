@@ -23,3 +23,19 @@ cron-ledger --system-root /nonexistent --crontab-user ops=examples/backup.cronta
 ```
 
 Expected exit code: 1
+
+## Next-run preview
+
+The same invented files, without a log. `--next` is the instant you supply. It is not the machine clock. `--tz` is required. The named crontab is the whole input: `--system-root /nonexistent` is not scanned.
+
+On 20 October 2026 at 03:00 UTC the sample job (04:15) is still ahead in UTC, and already past in Europe/Amsterdam, so Amsterdam's next run is the next day.
+
+```
+cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --next 2026-10-20T03:00:00Z --tz UTC
+```
+
+```
+cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --next 2026-10-20T03:00:00Z --tz Europe/Amsterdam
+```
+
+`tests/next_preview.rs` runs both. Exit code 0.

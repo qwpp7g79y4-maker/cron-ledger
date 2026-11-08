@@ -28,6 +28,7 @@ use crate::ledger::{
     ScheduledJob,
 };
 use crate::log::{self, LogEvent};
+use crate::preview::{self, NextJob};
 use crate::schedule::{self, default_timezone, resolve_timezone};
 use crate::systemd;
 
@@ -425,6 +426,204 @@ impl std::fmt::Display for BuildError {
         }
         Ok(())
     }
+}
+
+fn no_jobs_message(label: &str, rejected: &[String]) -> String {
+    let mut msg = format!("{label}: no jobs found");
+    if !rejected.is_empty() {
+        msg.push_str(&format!(
+            " ({} line(s) rejected, first: {})",
+            rejected.len(),
+            rejected[0]
+        ));
+    }
+    msg.push_str("; check that this is a crontab with at least one schedule line");
+    msg
+}
+
+fn schedule_zone(job: &CronJob, default_tz: &TimeZone, warnings: &mut Vec<String>) -> TimeZone {
+    match job.effective_tz() {
+        Some(name) => match resolve_timezone(name) {
+            Ok(tz) => tz,
+            Err(e) => {
+                warnings.push(format!("{}:{}: {e}", job.file, job.line));
+                default_tz.clone()
+            }
+        },
+        None => default_tz.clone(),
+    }
+}
+
+fn push_cron_preview(
+    jobs: &mut Vec<NextJob>,
+    warnings: &mut Vec<String>,
+    parsed: crontab::ParseResult,
+    default_tz: &TimeZone,
+    at: Timestamp,
+) {
+    for w in &parsed.warnings {
+        warnings.push(format!("{}:{}: {}", w.file, w.line, w.message));
+    }
+    for job in &parsed.jobs {
+        let schedule_tz = schedule_zone(job, default_tz, warnings);
+        let next = preview::next_cron(job, &schedule_tz, at);
+        if matches!(job.schedule, ScheduleKind::Standard(_)) && next.is_none() {
+            warnings.push(format!(
+                "{}:{}: schedule can never run (no such date exists)",
+                job.file, job.line
+            ));
+        }
+        let schedule = match &job.schedule {
+            ScheduleKind::Reboot => "@reboot".to_string(),
+            ScheduleKind::Standard(s) => describe_schedule(s),
+        };
+        let user = job.user.clone().unwrap_or_default();
+        jobs.push(NextJob {
+            label: format!("{user}: {}", normalize_command(&job.command)),
+            file: job.file.clone(),
+            line: job.line,
+            schedule,
+            next,
+        });
+    }
+}
+
+/// Next run of each named crontab or timer, at or after `at_text`.
+///
+/// `at_text` is an RFC3339 instant from the caller. This function does not
+/// read the machine clock. `--tz` is required: times are printed in that
+/// zone. A job's `CRON_TZ` still decides when that job fires. A plain
+/// `TZ=` line does not. The system root is not scanned, so a host crontab
+/// is not added.
+pub fn preview(cli: &Cli, at_text: &str) -> Result<preview::NextPreview, BuildError> {
+    let at: Timestamp = at_text.parse().map_err(|_| {
+        format!(
+            "'{at_text}' is not an RFC3339 timestamp; --next takes the instant from you, for example --next 2026-10-20T00:00:00Z"
+        )
+    })?;
+    let tz = match cli.tz.as_deref() {
+        Some(name) if !name.is_empty() => resolve_timezone(name)?,
+        _ => {
+            return Err(
+                "--next needs an explicit --tz, for example --tz UTC or --tz Europe/Amsterdam"
+                    .to_string()
+                    .into(),
+            );
+        }
+    };
+    if cli.crontabs.is_empty() && cli.crontab_users.is_empty() && cli.timer_units.is_empty() {
+        return Err(
+            "--next needs a crontab or a timer unit; pass --crontab PATH, --crontab-user USER=PATH, or --timer-unit PATH. --next does not scan --system-root"
+                .to_string()
+                .into(),
+        );
+    }
+
+    let mut jobs = Vec::new();
+    let mut warnings = Vec::new();
+
+    for path in &cli.crontabs {
+        let content = read_text(path)?;
+        let label = path.label();
+        let parsed = crontab::parse_system_crontab(&content, &label);
+        let rejected = rejected_lines(&parsed);
+        let before = jobs.len();
+        push_cron_preview(&mut jobs, &mut warnings, parsed, &tz, at);
+        if jobs.len() == before {
+            return Err(no_jobs_message(&label, &rejected).into());
+        }
+    }
+
+    for (user, path) in &cli.crontab_users {
+        let content = read_text(path)?;
+        let label = path.label();
+        let parsed = crontab::parse_user_crontab(&content, &label, Some(user));
+        let rejected = rejected_lines(&parsed);
+        let before = jobs.len();
+        push_cron_preview(&mut jobs, &mut warnings, parsed, &tz, at);
+        if jobs.len() == before {
+            return Err(no_jobs_message(&label, &rejected).into());
+        }
+    }
+
+    for path in &cli.timer_units {
+        let content = read_text(path)?;
+        let label = path.label();
+        let timer = systemd::parse_timer_unit(&content, &label);
+        if timer.on_calendar.is_empty() && timer.unsupported_triggers.is_empty() {
+            let why = timer.warnings.first().map(|w| format!(", first: {w}"));
+            return Err(format!(
+                "{label}: no jobs found (no OnCalendar= or other trigger in a [Timer] section{}); pass a .timer unit file",
+                why.unwrap_or_default()
+            )
+            .into());
+        }
+        warnings.extend(timer.warnings.iter().cloned());
+        let unit_name = timer
+            .unit
+            .clone()
+            .unwrap_or_else(|| derive_service_unit(path));
+        if timer.on_calendar.is_empty() {
+            jobs.push(NextJob {
+                label: unit_name,
+                file: label,
+                line: 0,
+                schedule: format!("unsupported: {}", timer.unsupported_triggers.join(", ")),
+                next: None,
+            });
+            continue;
+        }
+
+        let mut next: Option<Timestamp> = None;
+        let mut any_parsed = false;
+        let mut any_elapse = false;
+        let mut first_error: Option<String> = None;
+        for cal_str in &timer.on_calendar {
+            match systemd::parse_calendar(cal_str) {
+                Ok(cal) => {
+                    any_parsed = true;
+                    match systemd::first_calendar_on_or_after(&cal, &tz, at) {
+                        Ok(Some(t)) => {
+                            any_elapse = true;
+                            next = Some(next.map_or(t, |prev| prev.min(t)));
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            let msg = format!("OnCalendar '{cal_str}': {e}");
+                            first_error.get_or_insert_with(|| msg.clone());
+                            warnings.push(format!("{label}: {msg}"));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("OnCalendar '{cal_str}': {e}");
+                    first_error.get_or_insert_with(|| msg.clone());
+                    warnings.push(format!("{label}: {msg}"));
+                }
+            }
+        }
+        if !any_parsed && timer.unsupported_triggers.is_empty() {
+            return Err(format!(
+                "{label}: no jobs found (no valid OnCalendar=, first: {}); fix the OnCalendar= value in the unit",
+                first_error.unwrap_or_default()
+            )
+            .into());
+        }
+        if any_parsed && !any_elapse {
+            warnings.push(format!(
+                "{label}: OnCalendar schedule can never run (no such date exists)"
+            ));
+        }
+        jobs.push(NextJob {
+            label: unit_name,
+            file: label,
+            line: 0,
+            schedule: timer.on_calendar.join("; "),
+            next,
+        });
+    }
+
+    Ok(preview::render(&jobs, at, &tz, &warnings))
 }
 
 /// Build the ledger for `cli`, using `now` as "the current time" for a

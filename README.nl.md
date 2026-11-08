@@ -46,6 +46,9 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             [--syslog PATH|-]... [--journal-json PATH|-]...
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
             [--tolerance 5m] [--json] [-h | --help]
+cron-ledger --next <RFC3339> --tz <UTC|Europe/Amsterdam> [--crontab PATH|-]...
+            [--crontab-user USER=PATH]... [--timer-unit PATH]... [--output PATH]
+            [--quiet | --verbose]
 ```
 
 `-` betekent stdin; over alle opties samen mag hooguit één bron van stdin lezen. `--since`/`--until` nemen een RFC3339-tijdstip of een duur in de stijl van `systemd.time(7)`, teruggerekend vanaf nu (`30d`, `2h`...). Elke andere waarde is een gebruiksfout en eindigt met exitcode 2, met de melding `'{value}' is not an RFC3339 timestamp or a duration like '30d'`. Alle voorbeelden gebruiken de fixtures onder `tests/fixtures/`, dus elk voorbeeld is ook precies wat de testsuite draait. Behalve waar een opdracht juist de standaardscan van `--system-root` laat zien, zetten de voorbeelden `--system-root /nonexistent`. Een expliciete `--crontab`, `--crontab-user`, `--timer-unit` of `--timers-list` zet die scan al uit, dus dat pad wordt niet gelezen. Het blijft in het voorbeeld staan zodat het weglaten van de bronvlag je eigen `/etc/crontab` en `/etc/cron.d/*` niet meeneemt.
@@ -174,7 +177,8 @@ vergelijkt beide met hun opgeslagen uitvoer.
 | `--journal-json PATH\|-` | Een opgeslagen `journalctl -o json`-export. Herhaalbaar. |
 | `--since <RFC3339\|30d>` | Begin van het venster. Verplicht. |
 | `--until <RFC3339\|30d>` | Einde van het venster (half-open). Standaard: nu. |
-| `--tz ZONE` | IANA-tijdzone voor het uitrekenen en voor logregels zonder zone, bijv. `Europe/Amsterdam`. Standaard: systeemzone, anders UTC. |
+| `--tz ZONE` | IANA-tijdzone voor het uitrekenen en voor logregels zonder zone, bijv. `Europe/Amsterdam`. Standaard: systeemzone, anders UTC. Verplicht bij `--next`. |
+| `--next <RFC3339>` | Volgende run van elke genoemde crontab of timer op of na dit tijdstip, getoond in `--tz`. Een duur wordt geweigerd. De klok van de machine wordt niet gelezen. `--system-root` wordt niet gescand. |
 | `--tolerance SPAN` | Hoe laat een gebeurtenis mag zijn en toch `OK` is. Standaard `5m`. |
 | `--json` | Eén JSON-document in plaats van het tekstrapport. |
 | `--output PATH` | Schrijf het rapport naar dit bestand in plaats van standaarduitvoer. Een bestaand bestand wordt overschreven. Een ontbrekende bovenliggende map is exitcode 2 en wordt niet aangemaakt. |
@@ -209,7 +213,7 @@ Elk genoemd bestand, elke crontab die `--system-root` vindt, elk `--diff`-rappor
 
 ## Wat het NIET doet
 
-- Geen live monitoring of alerting; het is een achteraf-analyse van een venster.
+- Geen live monitoring of alerting; het is een achteraf-analyse van een venster. `--next` is geen live-watch: je geeft het tijdstip mee, en de preview leest de klok van de machine niet.
 - Het ziet geen runs als er geen logs zijn. Dekking is één gesloten bereik per invoerbestand, van de eerste herkende regel van dat bestand tot de laatste, niet één bereik over alle bestanden. Een verwachte tijd binnen het bereik van een bestand zonder passende regel is MISSED. Eén syslog met een regel op 18 oktober 03:00 en een regel op 22 oktober 03:00 meldt 19, 20 en 21 oktober nog steeds als MISSED: die dagen liggen in dat bestand. Dezelfde twee regels in twee bestanden die niet op elkaar aansluiten, zoals `s.2.gz` dat op de 18e eindigt en `s.1` dat op de 22e begint, melden die drie dagen als NO_TRACE. Een gat tussen bestanden is geen bewijs dat de job niet draaide; geef elke rotatie apart mee als `--syslog` (een bestand dat je zelf aan elkaar hebt geplakt is één bereik). Verwachte tijden vóór de vroegste regel, ná de laatste regel, en een lege log zijn NO_TRACE. In `--json` zijn `log_coverage.first` en `log_coverage.last` de buitenste grenzen over de bestanden. Een tijd daartussen is alleen MISSED als die ook in het bereik van één enkel bestand valt. Het tekstrapport noemt het bereik van elk bestand.
 - Weet niet of een job **gelukt** is, tenzij cronie CMDEND of de journal de exitcode logt.
 - Geen anacron, fcron, Kubernetes CronJobs of macOS launchd (v1). Geen OnBootSec/OnUnitActiveSec.
@@ -223,7 +227,7 @@ Elk genoemd bestand, elke crontab die `--system-root` vindt, elk `--diff`-rappor
 ## Alternatieven
 
 - **Cronitor**, **healthchecks.io** (ook self-hostbaar, open source), **Dead Man's Snitch**: heartbeat-monitoring. Dit is beter voor live alerts, maar elke job moet vooraf een ping krijgen. Cronitor schrijft zelf dat cron-logs niet tonen welke jobs níet draaiden: https://cronitor.io/guides/where-are-cron-logs-stored
-- `systemctl list-timers`: laatste en volgende run voor timers, niet voor crontabs.
+- `systemctl list-timers`: laatste en volgende run voor timers op een live systeem. cron-ledger roept het niet aan. `--next` toont de volgende crontab- of `OnCalendar`-tijd uit een bestand dat je meegeeft, op een tijdstip dat je meegeeft, in een expliciete `--tz` (`UTC` of `Europe/Amsterdam`).
 - `cronic`/`chronic`: mail bij een fout, niet bij een ontbrekende run.
 - Advies: gebruik cron-ledger om achteraf gaten te vinden, en een heartbeat-dienst voor alerting vooruit.
 

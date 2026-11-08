@@ -9,6 +9,9 @@ cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root D
             --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
             [--tolerance 5m] [--json | --csv] [--output PATH] [--quiet | --verbose] [-h | --help]
 cron-ledger --diff OLD.json NEW.json
+cron-ledger --next <RFC3339> --tz <UTC|Europe/Amsterdam> [--crontab PATH|-]...
+            [--crontab-user USER=PATH]... [--timer-unit PATH]... [--output PATH]
+            [--quiet | --verbose]
 .fi
 .SH DESCRIPTION
 cron-ledger reads saved crontab files and systemd timer units, works out when each job should have run in a time window, and compares that with a saved syslog or journal.
@@ -211,6 +214,33 @@ No context line.
 .B --verbose
 Print the usage text after an error, and on success one context line on stderr, even when stderr is a pipe.
 .TP
+.B --next \fIRFC3339\fR
+Print the next run of each named crontab or timer unit at or after this instant.
+The value is an RFC3339 timestamp.
+A duration is rejected, so the machine clock is not read.
+.B --tz
+is required, for example
+.I UTC
+or
+.IR Europe/Amsterdam .
+Times are printed in that zone.
+A
+.B CRON_TZ=
+line still decides when that job fires.
+A plain
+.B TZ=
+line does not.
+Pass
+.BR --crontab ,
+.B --crontab-user
+or
+.BR --timer-unit .
+.B --next
+does not scan
+.B --system-root
+and does not read a log.
+Exit 0 when the preview is printed.
+.TP
 .B --diff \fIOLD.json\fR \fINEW.json\fR
 Compare two saved
 .B --json
@@ -230,6 +260,10 @@ Every audited run is
 and
 .B UNSUPPORTED_TRIGGER
 are informational and do not change this code.
+A
+.B --next
+preview also exits 0 when it is printed.
+It is not an audit.
 .TP
 .B 1
 At least one

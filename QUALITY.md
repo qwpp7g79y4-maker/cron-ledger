@@ -1,6 +1,13 @@
 # Quality record, cron-ledger 0.2.0
 
-Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the version-line test. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+Date: 2026-11-08. Branch: `prep/w24-fout`. The test table below was remeasured after the next-run preview. The 100 MiB measurement stays on commit `3d8d429`. The line-coverage measurement stays the one recorded below. No tag, no push, no publish.
+
+### 2026-11-08 (W-54, next-run preview, branch prep/w24-fout)
+
+- `--next <RFC3339> --tz ZONE` prints the next run of each named crontab or timer at or after that instant, in that zone. The instant is the argument. `UTC` and `Europe/Amsterdam` are both tested on `examples/sample.crontab`, `examples/backup.crontab`, and `tests/fixtures/systemd/tz-suffix.timer`. A `CRON_TZ=` line stays the schedule zone. `--next` does not scan `--system-root` and does not read the machine clock. `tests/next_preview.rs`.
+- `cargo test --no-fail-fast`: 431 passed / 0 failed / 0 ignored.
+- `cargo fmt --check`: clean. `cargo clippy --all-targets -- -D warnings`: clean.
+- Version stays 1.0.0. `rust-version` stays 1.85. The input limit stays 268435456 bytes. SIGINT stays exit 130. The README version stays 0.2.0.
 
 ### 2026-11-08 (W-66, version line, branch prep/w24-fout)
 
@@ -44,23 +51,24 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 ### `cargo test`
 
-416 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran. The over-limit test ran. The SIGINT test ran. The version-line tests ran.
+431 tests, 0 failed, 0 ignored. The strace test ran; it did not skip. The outgoing-connection test ran. The over-limit test ran. The SIGINT test ran. The version-line tests ran. The next-run preview tests ran.
 
 | Suite | Passed |
 | --- | ---: |
-| `src/lib.rs` | 256 |
+| `src/lib.rs` | 261 |
 | `src/main.rs` | 2 |
 | `tests/cli_e2e.rs` | 15 |
 | `tests/cli_report.rs` | 43 |
 | `tests/crontab_golden.rs` | 5 |
 | `tests/csv_diff.rs` | 7 |
-| `tests/error_messages.rs` | 24 |
+| `tests/error_messages.rs` | 28 |
 | `tests/examples_golden.rs` | 3 |
 | `tests/handbook_help.rs` | 2 |
 | `tests/input_limit.rs` | 1 |
 | `tests/json_schema.rs` | 1 |
 | `tests/ledger_golden.rs` | 20 |
 | `tests/log_golden.rs` | 11 |
+| `tests/next_preview.rs` | 6 |
 | `tests/offline.rs` | 1 |
 | `tests/readme_quickstart.rs` | 1 |
 | `tests/readonly_fixtures.rs` | 2 |
