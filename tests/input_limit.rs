@@ -1,6 +1,10 @@
 //! One byte over the documented input limit is exit 2.
 //! The file is sparse, lives in `/tmp`, and is removed when the test ends.
 //! It is not a repository file.
+//!
+//! Windows has no `/tmp` sparse-file path used here; unix only.
+
+#![cfg(unix)]
 
 use std::time::Duration;
 

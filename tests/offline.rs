@@ -26,6 +26,25 @@ fn bin() -> &'static str {
 /// `examples/sample.expected.txt`.
 #[test]
 fn sample_audit_matches_expected_output_with_outgoing_connections_blocked() {
+    // GitHub CI / pepai-worker-01 often lack user namespaces (EPERM / uid_map).
+    let probe = Command::new("unshare")
+        .args(["-rn", "true"])
+        .output()
+        .expect("unshare -rn true");
+    if !probe.status.success() {
+        let err = String::from_utf8_lossy(&probe.stderr);
+        let low = err.to_ascii_lowercase();
+        if low.contains("operation not permitted")
+            || low.contains("eperm")
+            || low.contains("uid_map")
+            || low.contains("permission denied")
+        {
+            eprintln!("overgeslagen: geen user namespace");
+            return;
+        }
+        panic!("unshare -rn true failed: {err}");
+    }
+
     let ns = ["--user", "--map-root-user", "--net", "--"];
     let proof = Command::new("unshare")
         .args(ns)

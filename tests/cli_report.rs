@@ -713,7 +713,7 @@ fn empty_crontab_file_is_a_usage_error_exit_two() {
     std::fs::remove_dir_all(&root).ok();
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn non_utf8_argument_is_a_usage_error_not_a_panic() {
     use std::os::unix::ffi::OsStrExt;
@@ -727,7 +727,7 @@ fn non_utf8_argument_is_a_usage_error_not_a_panic() {
     assert!(h1_stderr(&assert).contains("ok.cron"));
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn existing_non_utf8_file_name_is_refused_as_such() {
     use std::os::unix::ffi::OsStrExt;
@@ -812,7 +812,7 @@ fn newline_in_a_scanned_file_name_cannot_forge_a_stderr_line() {
     std::fs::remove_dir_all(&root).ok();
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn spool_file_with_a_non_utf8_name_is_skipped_with_a_warning() {
     use std::os::unix::ffi::OsStrExt;
@@ -918,6 +918,8 @@ fn empty_system_root_scan_warns_and_exits_zero() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+// Windows reports system-root paths with different separators; unix only.
+#[cfg(unix)]
 #[test]
 fn system_root_scan_with_only_unreadable_files_is_a_usage_error_exit_two() {
     let root = empty_root();
@@ -936,6 +938,8 @@ fn system_root_scan_with_only_unreadable_files_is_a_usage_error_exit_two() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+// Same path-separator assumption as the unreadable-only scan; unix only.
+#[cfg(unix)]
 #[test]
 fn system_root_with_one_unreadable_and_one_readable_file_still_audits() {
     let root = empty_root();

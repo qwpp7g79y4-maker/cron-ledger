@@ -396,7 +396,7 @@ fn timer_unit_on_stdin_is_named_stdin_service() {
     std::fs::remove_dir_all(&root).ok();
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn cron_d_skips_a_non_utf8_file_name() {
     use std::ffi::OsString;

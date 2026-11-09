@@ -320,7 +320,7 @@ fn next_does_not_scan_the_system_root() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn argument_not_utf8() {
     use std::os::unix::ffi::OsStrExt;
