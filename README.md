@@ -318,8 +318,8 @@ The first three run in CI (`.github/workflows/ci.yml`) along with `cargo
 audit` and `cargo deny check`. Run `cargo package` yourself before a
 release; CI does not run it.
 
-`cargo test --no-fail-fast` last measured 416 passed, 0 failed, 0 ignored
-(258 unit tests, 158 in the integration suites), on branch `prep/w24-fout`.
+`cargo test --no-fail-fast` last measured 431 passed, 0 failed, 0 ignored
+(263 unit tests, 168 in the integration suites), on branch `prep/w24-fout`.
 
 ## Support
 
