@@ -4,7 +4,7 @@
 
 Een gratis, open-source, alleen-lezen opdrachtregelprogramma in Rust. Het leest crontabs en systemd-timers, berekent wanneer elke job in een tijdvenster *had moeten* draaien, legt dat naast syslog of de journal, en meldt **OK**, **LATE**, **MISSED** of **NO_TRACE**. Het draait lokaal, maakt geen netwerkverbinding en schrijft niets.
 
-Versie **0.2.0**. Licentie: `MIT OR Apache-2.0`.
+Versie **1.0.0**. Licentie: `MIT OR Apache-2.0`.
 
 De tekstuitvoer is Engels, dezelfde taal als `--help` en de statuswoorden (`expected`, `found`, `last run`, `Summary`, `Log coverage`, `Window`, `Tolerance`, `Warnings`, `… and N more`).
 
@@ -260,7 +260,7 @@ cargo package
 
 De eerste drie draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audit` en `cargo deny check`. Draai `cargo package` zelf voor een release; CI doet dit niet.
 
-`cargo test --no-fail-fast` gaf bij de laatste meting 431 geslaagd, 0 mislukt, 0 genegeerd (263 unittests, 168 in de integratiesuites), op tak `prep/w24-fout`.
+`cargo test --no-fail-fast` gaf bij de laatste meting 431 geslaagd, 0 mislukt, 0 genegeerd (263 unittests, 168 in de integratiesuites), op tak `prep/w24-fout`, op commit `de2b401` plus deze wijzigingen.
 
 ## Steunen
 

@@ -5,6 +5,10 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - unreleased (release candidate)
+
+The previous version is 0.2.0. This 1.0.0 is not tagged and not published.
+
 ### Added
 
 - `--next <RFC3339> --tz ZONE` prints the next run of each named crontab or timer unit at or after that instant, in that timezone. The instant is the argument. A duration is rejected, so the machine clock is not read. `--tz` is required. The system root is not scanned. Exit 0 when the preview is printed. An audit's exit codes stay 0, 1, 2, 3 and 130. The input limit stays 268435456 bytes.
@@ -23,28 +27,32 @@ style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   option and reads no crontab or log. Exit 0 when the reports match, 1 when
   they differ, 2 on an input error.
 - README and README.nl have a section "Aan de slag in 5 minuten".
-  `tests/readme_quickstart.rs` runs its commands literally. The measured
-  test count is 412.
-
-## [1.0.0] - 2026-11-08
-
-The previous version is 0.2.0.
-
-### Added
-
-- `--version` and `-V` print `cron-ledger <version>`.
+  `tests/readme_quickstart.rs` runs its commands literally. Measured on
+  commit `de2b401` plus these changes: 431 passed, 0 failed, 0 ignored.
 - `examples/backup.*`: a second invented example (LATE and MISSED) with
   stored expected output, and `tests/examples_golden.rs` comparing both
   examples with it.
 - README and README.nl: Example and Options sections; every option in
   `--help` is listed in both.
+- `CONTRIBUTING.md`: Rust 1.85, and `cargo fmt`, `cargo clippy` and
+  `cargo test` before a change is merged.
+- Rustdoc on the public items in `app`, `cli`, `crontab`, `diff`,
+  `ledger`, `log`, `report` and `systemd`.
+- `tests/json_schema.rs` pins the `--json` keys and value types.
+  `schema_version` stays 1.
 
 ### Changed
 
 - Usage error messages now say what to do next; exit codes are unchanged.
-- `--help` lists `-h | --help` itself (also in the man page).
+  The same wording covers `--crontab-user`, `--tolerance`, `--diff`,
+  `--since`, `--tz`, a source with no jobs, and a non-UTF-8 argument.
+- `--help` lists `-h | --help` itself (also in the man page). The manual
+  page header names cron-ledger 1.0.0.
 - LICENSE-MIT and LICENSE-APACHE: copyright 2025-2026 PEPAI / Pepijn de Jonge.
-- README and README.nl: state the measured test count (349 passed, 0 failed).
+- README and README.nl state the measured test count: 431 passed, 0 failed,
+  0 ignored, on commit `de2b401` plus these changes.
+- Security policy: the supported line is 1.0.x. Versions below 1.0 are
+  not supported. Fixes still go to the latest release only.
 
 ## [0.2.0] - 2026-11-02
 

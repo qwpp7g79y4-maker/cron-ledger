@@ -8,7 +8,7 @@ that up against syslog or the journal, and reports **OK**, **LATE**,
 **MISSED**, or **NO_TRACE**. It runs locally, makes no network
 connections, and writes nothing.
 
-Version **0.2.0**. License: `MIT OR Apache-2.0`.
+Version **1.0.0**. License: `MIT OR Apache-2.0`.
 
 ## Installation
 
@@ -319,7 +319,8 @@ audit` and `cargo deny check`. Run `cargo package` yourself before a
 release; CI does not run it.
 
 `cargo test --no-fail-fast` last measured 431 passed, 0 failed, 0 ignored
-(263 unit tests, 168 in the integration suites), on branch `prep/w24-fout`.
+(263 unit tests, 168 in the integration suites), on branch `prep/w24-fout`,
+on commit `de2b401` plus these changes.
 
 ## Support
 
