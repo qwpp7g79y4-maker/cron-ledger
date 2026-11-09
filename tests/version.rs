@@ -27,6 +27,8 @@ fn is_git_sha(sha: &str) -> bool {
     matches!(sha.len(), 40 | 64) && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// The binary under test is the debug build. Release omits the git sha.
+#[cfg(debug_assertions)]
 fn debug_bin() -> Command {
     let path = option_env!("CARGO_BIN_EXE_cron_ledger")
         .or(option_env!("CARGO_BIN_EXE_cron-ledger"))
@@ -34,6 +36,9 @@ fn debug_bin() -> Command {
     Command::new(path)
 }
 
+/// Debug only: a release binary prints `cron-ledger 1.0.0` and no sha.
+/// `release_version_flags_print_crate_version_without_a_sha` covers that.
+#[cfg(debug_assertions)]
 #[test]
 fn debug_version_flags_print_crate_version_and_git_sha_when_git_gives_one() {
     let sha = git_sha();
