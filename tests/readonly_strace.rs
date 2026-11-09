@@ -5,7 +5,9 @@
 //!
 //! Linux only: the syscall names checked here are Linux syscalls, and the
 //! `strace` shipped with Git for Windows is a different tool.
-#![cfg(target_os = "linux")]
+// Not under `cargo llvm-cov` (cfg(coverage)): the traced binary then writes a
+// .profraw, which this test correctly reports as a write-capable openat.
+#![cfg(all(target_os = "linux", not(coverage)))]
 
 use std::process::Command;
 

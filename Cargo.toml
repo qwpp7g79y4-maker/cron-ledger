@@ -29,3 +29,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "cron-ledger"
 path = "src/main.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
