@@ -1,15 +1,22 @@
-//! Runs the commands of the section "Aan de slag in 5 minuten" in README.md
-//! and README.nl.md literally. Each command line runs through `sh -c` from the
-//! repository root, with the built binary first on PATH. All commands use the
-//! fixtures in `examples/`.
+//! Runs the commands of the English "## Quick start" and Dutch
+//! "## Aan de slag in 5 minuten" sections literally. Each command line runs
+//! through `sh -c` from the repository root, with the built binary first on
+//! PATH. All commands use the fixtures in `examples/`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const HEADING: &str = "## Aan de slag in 5 minuten";
+fn heading(readme: &str) -> &'static str {
+    if readme.ends_with(".nl.md") {
+        "## Aan de slag in 5 minuten"
+    } else {
+        "## Quick start"
+    }
+}
+
 const FORBIDDEN: [&str; 5] = ["/var/log", "journalctl", "http://", "https://", "--tui"];
 
-fn commands(readme: &str) -> Vec<String> {
+fn commands(readme: &str, heading: &str) -> Vec<String> {
     let mut in_section = false;
     let mut in_fence = false;
     let mut out = Vec::new();
@@ -18,7 +25,7 @@ fn commands(readme: &str) -> Vec<String> {
             if in_section {
                 break;
             }
-            in_section = line.trim_end() == HEADING;
+            in_section = line.trim_end() == heading;
             continue;
         }
         if !in_section {
@@ -50,8 +57,9 @@ fn quickstart_commands_in_both_readmes_run_literally() {
     let mut per_readme = Vec::new();
     for name in ["README.md", "README.nl.md"] {
         let text = std::fs::read_to_string(root.join(name)).expect(name);
-        let cmds = commands(&text);
-        assert!(!cmds.is_empty(), "{name}: no commands under {HEADING:?}");
+        let section = heading(name);
+        let cmds = commands(&text, section);
+        assert!(!cmds.is_empty(), "{name}: no commands under {section:?}");
         for cmd in &cmds {
             for bad in FORBIDDEN {
                 assert!(!cmd.contains(bad), "{name}: {cmd:?} contains {bad:?}");

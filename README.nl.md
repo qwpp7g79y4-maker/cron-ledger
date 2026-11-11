@@ -1,12 +1,12 @@
 # cron-ledger
 
-[English](README.md) · Nederlands
+Een gratis, open-source, alleen-lezen opdrachtregelprogramma in Rust dat meldt of crontab- en systemd-timer-jobs echt hebben gedraaid: **OK**, **LATE**, **MISSED** of **NO_TRACE**.
 
-Een gratis, open-source, alleen-lezen opdrachtregelprogramma in Rust. Het leest crontabs en systemd-timers, berekent wanneer elke job in een tijdvenster *had moeten* draaien, legt dat naast syslog of de journal, en meldt **OK**, **LATE**, **MISSED** of **NO_TRACE**. Het draait lokaal, maakt geen netwerkverbinding en schrijft niets.
+English: [README.md](README.md). Handleiding: `man/cron-ledger.1`.
 
 [![crates.io](https://img.shields.io/crates/v/cron-ledger.svg)](https://crates.io/crates/cron-ledger) [![downloads](https://img.shields.io/crates/d/cron-ledger.svg)](https://crates.io/crates/cron-ledger) [![CI](https://github.com/qwpp7g79y4-maker/cron-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/qwpp7g79y4-maker/cron-ledger/actions/workflows/ci.yml) [![PEPAI gecontroleerd](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fqwpp7g79y4-maker%2Fcron-ledger%2Fmain%2F.github%2Fbadge.json)](QUALITY.md) [![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](Cargo.toml) [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#licentie)
 
-Versie **1.0.0**. Licentie: `MIT OR Apache-2.0`.
+`cron-ledger` leest crontabs en systemd-timers, berekent wanneer elke job in een tijdvenster *had moeten* draaien, en legt dat naast syslog of de journal. Het draait lokaal, maakt geen netwerkverbinding en schrijft niets.
 
 De tekstuitvoer is Engels, dezelfde taal als `--help` en de statuswoorden (`expected`, `found`, `last run`, `Summary`, `Log coverage`, `Window`, `Tolerance`, `Warnings`, `… and N more`).
 
@@ -16,6 +16,7 @@ Versie 1.0.0 staat op [crates.io](https://crates.io/crates/cron-ledger):
 
 ```sh
 cargo install cron-ledger
+cron-ledger --help
 ```
 
 Of bouw vanuit een checkout van deze repository:
