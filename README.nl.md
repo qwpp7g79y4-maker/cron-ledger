@@ -12,6 +12,8 @@ De tekstuitvoer is Engels, dezelfde taal als `--help` en de statuswoorden (`expe
 
 ## Installatie
 
+Versie 1.0.0 staat op [crates.io](https://crates.io/crates/cron-ledger):
+
 ```sh
 cargo install cron-ledger
 ```

@@ -14,6 +14,8 @@ Version **1.0.0**. License: `MIT OR Apache-2.0`.
 
 ## Installation
 
+Version 1.0.0 is on [crates.io](https://crates.io/crates/cron-ledger):
+
 ```sh
 cargo install cron-ledger
 ```
