@@ -8,6 +8,8 @@ that up against syslog or the journal, and reports **OK**, **LATE**,
 **MISSED**, or **NO_TRACE**. It runs locally, makes no network
 connections, and writes nothing.
 
+[![crates.io](https://img.shields.io/crates/v/cron-ledger.svg)](https://crates.io/crates/cron-ledger) [![downloads](https://img.shields.io/crates/d/cron-ledger.svg)](https://crates.io/crates/cron-ledger) [![CI](https://github.com/qwpp7g79y4-maker/cron-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/qwpp7g79y4-maker/cron-ledger/actions/workflows/ci.yml) [![PEPAI checked](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fqwpp7g79y4-maker%2Fcron-ledger%2Fmain%2F.github%2Fbadge.json)](QUALITY.md) [![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](Cargo.toml) [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 Version **1.0.0**. License: `MIT OR Apache-2.0`.
 
 ## Installation
