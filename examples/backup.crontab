@@ -1,0 +1,4 @@
+# invented example, not a real system
+MAILTO=""
+30 2 * * * /usr/local/bin/nightly-backup
+0 12 * * * /usr/local/bin/other-job

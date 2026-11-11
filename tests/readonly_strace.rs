@@ -5,7 +5,9 @@
 //!
 //! Linux only: the syscall names checked here are Linux syscalls, and the
 //! `strace` shipped with Git for Windows is a different tool.
-#![cfg(target_os = "linux")]
+// Not under `cargo llvm-cov` (cfg(coverage)): the traced binary then writes a
+// .profraw, which this test correctly reports as a write-capable openat.
+#![cfg(all(target_os = "linux", not(coverage)))]
 
 use std::process::Command;
 
@@ -31,6 +33,7 @@ fn strace_sees_no_network_calls_and_no_write_capable_openat() {
     let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let crontab_fixture = fixtures.join("crontab/system.crontab");
     let syslog_fixture = fixtures.join("logs/debian-syslog.log");
+    let timers_list_fixture = fixtures.join("systemd/list-timers.txt");
     let status = Command::new("strace")
         .args(["-f", "-e", "trace=network,openat", "-o"])
         .arg(&log_path)
@@ -39,6 +42,8 @@ fn strace_sees_no_network_calls_and_no_write_capable_openat() {
         .arg(&fixtures)
         .arg("--crontab")
         .arg(&crontab_fixture)
+        .arg("--timers-list")
+        .arg(&timers_list_fixture)
         .arg("--syslog")
         .arg(&syslog_fixture)
         .arg("--since")
@@ -68,7 +73,7 @@ fn strace_sees_no_network_calls_and_no_write_capable_openat() {
     // A completed-audit exit code alone doesn't prove the trace actually
     // covers the audit: confirm it contains a successful read of each
     // fixture named on the command line.
-    for fixture in [&crontab_fixture, &syslog_fixture] {
+    for fixture in [&crontab_fixture, &syslog_fixture, &timers_list_fixture] {
         let fixture = fixture.to_str().expect("fixture path is not UTF-8");
         let read = log.lines().any(|line| {
             line.contains("openat(") && line.contains(fixture) && !line.contains("= -1")

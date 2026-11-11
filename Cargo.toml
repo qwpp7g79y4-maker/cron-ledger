@@ -1,6 +1,6 @@
 [package]
 name = "cron-ledger"
-version = "0.1.1"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
@@ -29,3 +29,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "cron-ledger"
 path = "src/main.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }

@@ -1,0 +1,4 @@
+Oct 20 02:30:01 host CRON[101]: (ops) CMD (/usr/local/bin/nightly-backup)
+Oct 21 02:41:12 host CRON[102]: (ops) CMD (/usr/local/bin/nightly-backup)
+Oct 22 02:30:02 host CRON[103]: (ops) CMD (/usr/local/bin/nightly-backup)
+Oct 22 12:00:00 host CRON[104]: (ops) CMD (/usr/local/bin/other-job)

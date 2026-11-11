@@ -3,13 +3,14 @@
 //!
 //! Exit codes follow the documented CLI contract:
 //! **0** everything OK, **1** at least one MISSED or LATE, **3** only
-//! NO_TRACE and otherwise OK. A `--fail-on` flag was left as a documented
-//! future option rather than built now, since the brief marks its
-//! shape as undecided.
+//! NO_TRACE and otherwise OK. Exit 3 is the 0.2.0 contract. A `--fail-on`
+//! flag is not part of this release.
 
+mod csv;
 mod json;
 mod text;
 
+pub use csv::render_csv;
 pub use json::render_json;
 pub use text::render_text;
 
@@ -21,6 +22,7 @@ use jiff::Timestamp;
 
 use crate::ledger::{JobKey, JobOutcome, Ledger, Status};
 
+/// `schema_version` written by `--json`. This release writes 1.
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Everything the report renderers need beyond the [`Ledger`] itself:
@@ -28,10 +30,15 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// (kept out of the `ledger` module's own types so the ledger tests
 /// and golden files don't need to change shape for a display concern).
 pub struct ReportContext<'a> {
+    /// Inclusive start of the audit window.
     pub since: Timestamp,
+    /// Exclusive end of the audit window.
     pub until: Timestamp,
+    /// Timezone used to display times.
     pub tz: &'a TimeZone,
+    /// Base matching tolerance from `--tolerance`.
     pub tolerance: Duration,
+    /// Human-readable schedule text for each job.
     pub descriptions: &'a HashMap<JobKey, String>,
     /// Parse/log warnings collected during input reading, in addition to
     /// `ledger.warnings`.
@@ -70,6 +77,21 @@ pub fn exit_code(ledger: &Ledger) -> i32 {
 /// unset. A pure function so it is unit-testable without a real terminal.
 pub fn use_color(no_color_set: bool, is_tty: bool) -> bool {
     is_tty && !no_color_set
+}
+
+/// Make untrusted text (a path, a warning) safe to write to a terminal on
+/// stderr. Every control character, `\n` and `\t` included, becomes a
+/// visible `\u{...}` form, so the text cannot start a line of its own.
+pub fn neutralize_controls(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_control() {
+            out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// How many of a job's earliest `MISSED` times the report shows
@@ -111,7 +133,16 @@ pub(super) fn job_views<'a>(
             let (expected, found, missed, late, last_run, first_missed) = match &entry.outcome {
                 JobOutcome::Standard(outcomes) => {
                     let expected = outcomes.len();
-                    let found = outcomes.iter().filter(|o| o.actual.is_some()).count();
+                    // `actual` on a MISSED/NO_TRACE row is not a run found
+                    // at the expected time. A list-timers check stores the
+                    // older LAST there so the report can print it.
+                    let found = outcomes
+                        .iter()
+                        .filter(|o| {
+                            o.actual.is_some()
+                                && !matches!(o.status, Status::Missed | Status::NoTrace)
+                        })
+                        .count();
                     let missed = outcomes
                         .iter()
                         .filter(|o| o.status == Status::Missed)
@@ -158,6 +189,14 @@ mod tests {
     use super::*;
     use crate::ledger::{JobLedgerEntry, RunOutcome};
     use crate::log::ExitStatus;
+
+    #[test]
+    fn neutralize_escapes_esc_newline_cr_and_tab() {
+        assert_eq!(
+            neutralize_controls("a\x1b\n  - b\x07\r\t"),
+            "a\\u{1b}\\u{a}  - b\\u{7}\\u{d}\\u{9}"
+        );
+    }
 
     fn entry(outcome: JobOutcome) -> JobLedgerEntry {
         JobLedgerEntry {

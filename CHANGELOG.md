@@ -3,6 +3,121 @@
 All notable changes to this project are documented in this file, in the
 style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+## [1.0.0] - 2026-11-09
+
+The previous version is 0.2.0. This 1.0.0 is not tagged and not published.
+
+### Added
+
+- `--next <RFC3339> --tz ZONE` prints the next run of each named crontab or timer unit at or after that instant, in that timezone. The instant is the argument. A duration is rejected, so the machine clock is not read. `--tz` is required. The system root is not scanned. Exit 0 when the preview is printed. An audit's exit codes stay 0, 1, 2, 3 and 130. The input limit stays 268435456 bytes.
+- `--version` and `-V` print `cron-ledger 1.0.0` and exit 0. A debug build also prints the git commit when `git rev-parse --verify HEAD` provides one. A release build prints the version only. No commit is invented when git does not provide one.
+- SIGINT exits 130. Stderr is `cron-ledger: interrupted by SIGINT`. The report is not left half-written: `--output` keeps the previous file until the new report is complete, and a signal before that writes nothing. Ordinary exit codes stay 0, 1, 2 and 3. The input limit stays 268435456 bytes.
+- Each named file, each crontab found by `--system-root`, each `--diff` report, and standard input may be at most 268435456 bytes (256 MiB). A larger input exits 2 with `file is larger than 268435456 bytes` and is not loaded. A `.gz` log is refused when the inflated text passes that size. The measured 100 MiB input stays under this limit. Exit codes stay 0, 1, 2 and 3.
+- `tests/offline.rs`: `sample_audit_matches_expected_output_with_outgoing_connections_blocked` runs the sample audit in a network namespace (`unshare --user --map-root-user --net`) whose route table is empty. The report matches `examples/sample.expected.txt`. No provider and no price were added.
+- `--quiet` and `--verbose`. A pipe or a redirect omits the usage text after an error. `--verbose` prints that text and, on success, one `context:` line on stderr. `--quiet` omits both even on a terminal. The report on stdout is unchanged. Exit codes stay 0, 1, 2 and 3. `--quiet` together with `--verbose` is exit 2.
+- `--output PATH`: write the report to a file instead of standard output.
+  An existing file is replaced. A missing parent directory exits 2 and is
+  not created. Exit codes are unchanged.
+- `--csv`: write the report as CSV (RFC 4180, one row per audited run)
+  instead of the text report. It cannot be combined with `--json`.
+- `--diff OLD.json NEW.json`: compare two saved `--json` reports and list
+  added and removed jobs and runs whose status changed. It takes no other
+  option and reads no crontab or log. Exit 0 when the reports match, 1 when
+  they differ, 2 on an input error.
+- README and README.nl have a section "Aan de slag in 5 minuten".
+  `tests/readme_quickstart.rs` runs its commands literally. Measured on
+  commit `de2b401` plus these changes: 431 passed, 0 failed, 0 ignored.
+- `examples/backup.*`: a second invented example (LATE and MISSED) with
+  stored expected output, and `tests/examples_golden.rs` comparing both
+  examples with it.
+- README and README.nl: Example and Options sections; every option in
+  `--help` is listed in both.
+- `CONTRIBUTING.md`: Rust 1.85, and `cargo fmt`, `cargo clippy` and
+  `cargo test` before a change is merged.
+- Rustdoc on the public items in `app`, `cli`, `crontab`, `diff`,
+  `ledger`, `log`, `report` and `systemd`.
+- `tests/json_schema.rs` pins the `--json` keys and value types.
+  `schema_version` stays 1.
+
+### Changed
+
+- Usage error messages now say what to do next; exit codes are unchanged.
+  The same wording covers `--crontab-user`, `--tolerance`, `--diff`,
+  `--since`, `--tz`, a source with no jobs, and a non-UTF-8 argument.
+- `--help` lists `-h | --help` itself (also in the man page). The manual
+  page header names cron-ledger 1.0.0.
+- LICENSE-MIT and LICENSE-APACHE: copyright 2025-2026 PEPAI / Pepijn de Jonge.
+- README and README.nl state the measured test count: 431 passed, 0 failed,
+  0 ignored, on commit `de2b401` plus these changes.
+- Security policy: the supported line is 1.0.x. Versions below 1.0 are
+  not supported. Fixes still go to the latest release only.
+
+## [0.2.0] - 2026-11-02
+
+### Added
+
+- Handbook for the binary: `man/cron-ledger.1` (a roff manual page whose
+  usage line is the program's help text), `examples/` with an invented
+  crontab and syslog plus the command and its exit code, and
+  `tests/handbook_help.rs`. `README.md` points at the manual page.
+- `--timers-list` reads a saved `systemctl list-timers --all` listing
+  (LAST, NEXT and UNIT only). It does not run `systemctl`. The report's
+  last run is that LAST column. A NEXT already due before `--until`, past
+  `--tolerance`, is `MISSED` when LAST is missing or older than that NEXT
+  by more than `--tolerance`; otherwise the last run is `OK`.
+- **Public API (`ledger` module):** `JobSchedule::ListedTimer` carries
+  that already-judged row. It is not matched against logs.
+- **Public API (`systemd` module):** `parse_list_timers` and
+  `evaluate_listed_timer`.
+
+### Changed
+
+- README: daylight-saving behaviour follows cronie's daemon (`cron(8)`
+  and `src/cron.c`), not the contradictory paragraph in `crontab(5)`.
+  The schedule itself is unchanged.
+- Security policy: the supported line is 0.2.x. Fixes go to the latest
+  release only.
+- **Behaviour change from 0.1.1:** invalid UTF-8 in a crontab or a timer
+  unit is now refused with exit 2 and a message that names the byte offset.
+  0.1.1 read such input lossily and carried on with a warning. The strict
+  behaviour is intentional: a lossy read can silently change a job's
+  command or schedule, and the ledger would audit the wrong thing.
+- **Public API (`app` module):** `app::build` now returns
+  `Result<Audit, BuildError>` instead of `Result<Audit, String>`;
+  `BuildError` carries a `message` and a list of `details`.
+- **Public API (`log` module):** `LogText` has a new public field
+  `nul_lines_skipped`, and `read_log_source` now returns an
+  `InvalidData` error for a log that contains UTF-16 or too many NUL bytes.
+  Code that builds `LogText` by struct literal or matches on the old
+  `String` error needs updating.
+
+### Fixed
+
+- Empty or unreadable input exited 0 ("all OK"). Every text input now goes
+  through one `decode_text`: a UTF-8 BOM is stripped (a BOM-prefixed timer
+  unit lost its `[Timer]` section), and a UTF-16/UTF-32 BOM or a NUL byte is
+  refused with exit 2 (a UTF-16 crontab gave 0 jobs and exit 0).
+- A named `--crontab`, `--crontab-user` or `--timer-unit` that yields no job
+  (empty file, empty stdin, only invalid lines, a timer with no trigger) is
+  now exit 2, and so is a `--system-root` that is not a directory.
+- A `--system-root` scan that found crontab files and could read none of
+  them (every file UTF-16 or NUL, or an unreadable directory) is now exit 2
+  with the reasons on stderr. A root with no crontab files stays exit 0, with a
+  `no crontab file found` warning.
+- A timer unit whose `OnCalendar=` values are all invalid is now exit 2, and
+  `OnCalendar=` with no value resets the list as it does in systemd.
+- A non-UTF-8 argument is refused with exit 2 and a message saying so, and
+  control characters in a path are escaped in error messages on stderr.
+- A spool file whose name is not valid UTF-8 is skipped with a warning
+  instead of being audited as a job for user `""`.
+- A NUL byte in a syslog, journal or `.gz` log skips only its own line
+  (with a warning); a log that is a quarter NUL or more is still refused.
+- A non-UTF-8 argument, or an error message written to a full stderr
+  (`2>/dev/full`), no longer panics (exit 101); both exit 2. A closed stderr
+  (`2>&-`) never panicked.
+
 ## [0.1.1] - 2026-10-28
 
 ### Fixed

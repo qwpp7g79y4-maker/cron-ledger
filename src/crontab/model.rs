@@ -7,18 +7,21 @@ use std::collections::BTreeSet;
 ///
 /// `Star` means "every legal value, unrestricted". `Values` containing
 /// every legal value (e.g. from `1-31`) is kept distinct from it purely
-/// for display (`describe_field`); neither the wildcard DST rule in
-/// [`crate::schedule::expand`] nor the day-of-month/day-of-week OR/AND
-/// rule uses this distinction (see [`Schedule::minute_star`]/
-/// [`Schedule::hour_star`] and [`Schedule::dom_star`]/
-/// [`Schedule::dow_star`] instead).
+/// for display (`describe_field`) and for the wildcard-hour DST check in
+/// [`crate::schedule::expand`]; the day-of-month/day-of-week OR/AND rule
+/// does *not* use this distinction (see [`Schedule::dom_star`]/
+/// [`Schedule::dow_star`] and [`matches_day`] instead).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Field {
+    /// Every legal value. Displayed as `*`.
     Star,
+    /// The listed values. A field that names every legal value stays
+    /// here, distinct from [`Field::Star`].
     Values(BTreeSet<u8>),
 }
 
 impl Field {
+    /// Whether `v` is allowed. [`Field::Star`] allows every value.
     pub fn contains(&self, v: u32) -> bool {
         match self {
             Field::Star => true,
@@ -30,10 +33,15 @@ impl Field {
 /// The five vixie-cron schedule fields of a non-`@`-special line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Schedule {
+    /// Minute, 0–59.
     pub minute: Field,
+    /// Hour, 0–23.
     pub hour: Field,
+    /// Day of month, 1–31.
     pub dom: Field,
+    /// Month, 1–12.
     pub month: Field,
+    /// Day of week, 0–7. Both 0 and 7 are Sunday.
     pub dow: Field,
     /// Whether the raw day-of-month field's first character was `*`
     /// (`crontab(5)`: "don't start with *"), e.g. true for both `*` and
@@ -42,28 +50,23 @@ pub struct Schedule {
     pub dom_star: bool,
     /// Same as `dom_star`, for the day-of-week field.
     pub dow_star: bool,
-    /// Whether the raw minute field's first character was `*` (cronie's
-    /// `MIN_STAR`), e.g. true for `*` and `*/15`. Together with
-    /// `hour_star` this makes the job a wildcard job for DST in
-    /// [`crate::schedule::expand`]. Not part of the JSON output.
-    #[serde(skip)]
-    pub minute_star: bool,
-    /// Same as `minute_star`, for the hour field (cronie's `HR_STAR`).
-    #[serde(skip)]
-    pub hour_star: bool,
 }
 
 /// `@reboot` has no computable schedule of expected run times; every other
 /// `@`-special expands to an equivalent [`Schedule`] before parsing stops.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum ScheduleKind {
+    /// A five-field schedule, including an `@yearly`, `@monthly`,
+    /// `@weekly`, `@daily`, or `@hourly` line after it was expanded.
     Standard(Schedule),
+    /// `@reboot`. No expected run times.
     Reboot,
 }
 
 /// One parsed, schedulable crontab line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CronJob {
+    /// The schedule, or [`ScheduleKind::Reboot`].
     pub schedule: ScheduleKind,
     /// From a `TZ=` env line active at this point in the file. This only
     /// reaches the job's own environment (as cronie documents it); it has
@@ -77,9 +80,14 @@ pub struct CronJob {
     /// `None` for a per-user crontab where the user comes from the file's
     /// location, not an inline column.
     pub user: Option<String>,
+    /// Command text after an unescaped `%` has split off the stdin payload.
     pub command: String,
+    /// Text after the first unescaped `%`, which cron feeds to the command
+    /// on stdin. Absent when the line has no such `%`.
     pub stdin: Option<String>,
+    /// Path of the crontab this line came from.
     pub file: String,
+    /// 1-based line number in `file`.
     pub line: usize,
 }
 
@@ -93,16 +101,23 @@ impl CronJob {
     }
 }
 
+/// One crontab line that was skipped, with where it was.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ParseWarning {
+    /// Path of the crontab.
     pub file: String,
+    /// 1-based line number.
     pub line: usize,
+    /// Why the line was skipped.
     pub message: String,
 }
 
+/// Jobs that parsed, plus the lines that did not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct ParseResult {
+    /// Schedulable lines, in file order.
     pub jobs: Vec<CronJob>,
+    /// Lines that were skipped. Parsing does not stop for these.
     pub warnings: Vec<ParseWarning>,
 }
 
@@ -174,8 +189,6 @@ mod tests {
             dow: values(&[1, 5]),
             dom_star: true,
             dow_star: false,
-            minute_star: false,
-            hour_star: true,
         };
         assert_eq!(describe_schedule(&schedule), "0,15,30,45 * * * 1,5");
     }

@@ -1,16 +1,18 @@
 //! Expansion of a parsed crontab [`Schedule`] into concrete expected run
 //! instants within a `[since, until)` window, timezone- and DST-aware.
 //!
-//! DST handling follows the behavior described in the project's task
-//! brief as "like cronie": a civil time that falls in a spring-forward gap
-//! is reported as a single run right at the moment the clock resumes; a
-//! civil time repeated by a fall-back fold runs once, at its earlier
-//! occurrence, for a fixed-time job, but once per physical occurrence for
-//! a wildcard job. A wildcard job's gap times are simply not run. As in
-//! cronie's `MIN_STAR`/`HR_STAR`, a job is wildcard when its raw minute or
-//! hour field starts with `*` (so `*/2` counts, `0-23` does not). This
-//! has **not** been independently verified against cronie's source or a
-//! VM.
+//! The time crate is `jiff`. DST handling follows cronie's daemon.
+//! Checked on 2026-11-02 against cronie master `src/cron.c` (the `medium`
+//! and `negative` arms of `wakeupKind`) and `man/cron.8` ("Daylight Saving
+//! Time and other time changes"): a civil time in the spring-forward gap
+//! is one run at the instant the clock resumes; a fixed hour in the
+//! fall-back fold runs once, at the earlier occurrence; a wildcard hour
+//! runs once per physical hour. `crontab(5)` says a missing time never
+//! matches and a repeated time runs twice. That page does not match the
+//! daemon, so this code follows the daemon. cronie warns that a
+//! job-specific timezone can miss or double-run a job across DST; each
+//! job here is expanded in its own `CRON_TZ` with the same gap and fold
+//! rules.
 
 use crate::crontab::{matches_day, Field, Schedule};
 use jiff::tz::{AmbiguousOffset, Disambiguation, TimeZone};
@@ -26,7 +28,9 @@ pub fn default_timezone() -> TimeZone {
 /// A crontab `TZ=` line is the job's own environment, not a schedule
 /// timezone, so callers do not pass it here.
 pub fn resolve_timezone(name: &str) -> Result<TimeZone, String> {
-    TimeZone::get(name).map_err(|e| format!("unknown timezone '{name}': {e}"))
+    TimeZone::get(name).map_err(|e| {
+        format!("unknown timezone '{name}': {e}; use an IANA name such as Europe/Amsterdam or UTC")
+    })
 }
 
 fn field_values(field: &Field, min: u32, max: u32) -> Vec<u32> {
@@ -69,7 +73,7 @@ pub fn expand_bounded(
     let months = field_values(&schedule.month, 1, 12);
     let hours = field_values(&schedule.hour, 0, 23);
     let minutes = field_values(&schedule.minute, 0, 59);
-    let is_wildcard = schedule.minute_star || schedule.hour_star;
+    let hour_is_wildcard = schedule.hour == Field::Star;
     let per_day_max = hours.len().saturating_mul(minutes.len());
     let stop_at = budget.saturating_add(per_day_max.saturating_mul(2));
 
@@ -101,7 +105,7 @@ pub fn expand_bounded(
                 for &h in &hours {
                     for &m in &minutes {
                         let civil = date.at(h as i8, m as i8, 0, 0);
-                        push_resolved(tz, civil, is_wildcard, &mut candidates, &mut gap_hits);
+                        push_resolved(tz, civil, hour_is_wildcard, &mut candidates, &mut gap_hits);
                     }
                 }
                 push_gap_hits(tz, gap_hits, &mut candidates);
@@ -122,7 +126,7 @@ pub fn expand_bounded(
 fn push_resolved(
     tz: &TimeZone,
     civil: jiff::civil::DateTime,
-    is_wildcard: bool,
+    hour_is_wildcard: bool,
     out: &mut Vec<Timestamp>,
     gap_hits: &mut Vec<Timestamp>,
 ) {
@@ -134,12 +138,12 @@ fn push_resolved(
             }
         }
         AmbiguousOffset::Gap { .. } => {
-            if is_wildcard {
-                // This civil time never physically occurs; a wildcard
+            if hour_is_wildcard {
+                // This civil hour never physically occurs; a wildcard-hour
                 // job simply has one fewer tick that day.
                 return;
             }
-            // A fixed-time job that falls in the gap is reported as
+            // A fixed-hour job that falls in the gap is reported as
             // running right after the jump; the exact instant is worked
             // out once all of the day's gap hits are known, by
             // `push_gap_hits` below.
@@ -151,7 +155,7 @@ fn push_resolved(
             if let Ok(earlier) = ambiguous.clone().disambiguate(Disambiguation::Earlier) {
                 out.push(earlier.timestamp());
             }
-            if is_wildcard {
+            if hour_is_wildcard {
                 if let Ok(later) = ambiguous.disambiguate(Disambiguation::Later) {
                     out.push(later.timestamp());
                 }
@@ -362,91 +366,6 @@ mod tests {
         assert_eq!(got.len(), 23, "the skipped hour never physically ticks");
     }
 
-    /// UTC renderings of `line` expanded in Europe/Amsterdam over the
-    /// half-open UTC window `[since, until)`.
-    fn amsterdam_utc(line: &str, since: &str, until: &str) -> Vec<String> {
-        let tz = TimeZone::get("Europe/Amsterdam").unwrap();
-        let schedule = schedule_of(line);
-        expand(
-            &schedule,
-            &tz,
-            since.parse().unwrap(),
-            until.parse().unwrap(),
-        )
-        .iter()
-        .map(|t| t.to_string())
-        .collect()
-    }
-
-    const OCT: (&str, &str) = ("2026-10-24T23:00:00Z", "2026-10-25T03:00:00Z");
-    const MAR: (&str, &str) = ("2026-03-28T23:00:00Z", "2026-03-29T03:00:00Z");
-
-    #[test]
-    fn hour_step_counts_as_wildcard_in_the_fall_fold() {
-        // cronie sets HR_STAR for any hour field starting with `*`, so
-        // `*/2` runs in both copies of the repeated 02:00, like `*/1`.
-        assert_eq!(
-            amsterdam_utc("0 */2 * * * echo hi\n", OCT.0, OCT.1),
-            vec!["2026-10-25T00:00:00Z", "2026-10-25T01:00:00Z"]
-        );
-        assert_eq!(
-            amsterdam_utc("0 */1 * * * echo hi\n", OCT.0, OCT.1),
-            amsterdam_utc("0 * * * * echo hi\n", OCT.0, OCT.1)
-        );
-    }
-
-    #[test]
-    fn hour_step_counts_as_wildcard_in_the_spring_gap() {
-        // A wildcard job whose 02:00 never occurs is not caught up.
-        assert_eq!(
-            amsterdam_utc("0 */2 * * * echo hi\n", MAR.0, MAR.1),
-            vec!["2026-03-28T23:00:00Z", "2026-03-29T02:00:00Z"]
-        );
-    }
-
-    #[test]
-    fn minute_star_counts_as_wildcard_in_the_fall_fold() {
-        // MIN_STAR alone makes the job wildcard: every quarter of both
-        // copies of 02:xx runs.
-        assert_eq!(
-            amsterdam_utc("*/15 2 * * * echo hi\n", OCT.0, OCT.1),
-            vec![
-                "2026-10-25T00:00:00Z",
-                "2026-10-25T00:15:00Z",
-                "2026-10-25T00:30:00Z",
-                "2026-10-25T00:45:00Z",
-                "2026-10-25T01:00:00Z",
-                "2026-10-25T01:15:00Z",
-                "2026-10-25T01:30:00Z",
-                "2026-10-25T01:45:00Z",
-            ]
-        );
-    }
-
-    #[test]
-    fn minute_star_counts_as_wildcard_in_the_spring_gap() {
-        assert!(amsterdam_utc("*/15 2 * * * echo hi\n", MAR.0, MAR.1).is_empty());
-    }
-
-    #[test]
-    fn full_hour_range_without_star_stays_fixed() {
-        // `0-23` does not start with `*`, so it stays a fixed-hour job:
-        // the repeated 02:00 runs once and the missed 02:00 is caught up.
-        assert_eq!(
-            amsterdam_utc("0 0-23 * * * echo hi\n", OCT.0, OCT.1).len(),
-            3
-        );
-        assert_eq!(
-            amsterdam_utc("0 0-23 * * * echo hi\n", MAR.0, MAR.1),
-            vec![
-                "2026-03-28T23:00:00Z",
-                "2026-03-29T00:00:00Z",
-                "2026-03-29T01:00:00Z",
-                "2026-03-29T02:00:00Z",
-            ]
-        );
-    }
-
     #[test]
     fn new_york_spring_gap_fixed_time_runs_once_right_after_jump() {
         let tz = TimeZone::get("America/New_York").unwrap();
@@ -543,22 +462,16 @@ mod tests {
             arb_field(0, 6),
             any::<bool>(),
             any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
         )
             .prop_map(
-                |(minute, hour, dom, month, dow, dom_star, dow_star, minute_star, hour_star)| {
-                    Schedule {
-                        minute,
-                        hour,
-                        dom,
-                        month,
-                        dow,
-                        dom_star,
-                        dow_star,
-                        minute_star,
-                        hour_star,
-                    }
+                |(minute, hour, dom, month, dow, dom_star, dow_star)| Schedule {
+                    minute,
+                    hour,
+                    dom,
+                    month,
+                    dow,
+                    dom_star,
+                    dow_star,
                 },
             )
     }

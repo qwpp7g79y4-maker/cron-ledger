@@ -1,0 +1,10 @@
+audit: /usr/local/bin/ledger-sample (examples/sample.crontab:1) [15 4 * * *]
+  expected: 1, found: 1, missed: 0, late: 0
+  last run: 2026-10-20T04:15:01+00:00[UTC] (OK)
+  missed times: -
+
+----
+Summary: 1 OK, 0 LATE, 0 LATE (caught up), 0 MISSED, 0 NO_TRACE, 0 REBOOT_ONLY, 0 UNSUPPORTED_TRIGGER
+Log coverage: 2026-10-20T04:15:01+00:00[UTC] .. 2026-10-20T04:15:01+00:00[UTC]
+Window: 2026-10-20T00:00:00+00:00[UTC] .. 2026-10-21T00:00:00+00:00[UTC] (tz UTC)
+Tolerance: 300s

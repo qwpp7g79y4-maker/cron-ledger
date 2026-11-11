@@ -8,7 +8,9 @@ pub struct TimerUnit {
     /// Raw `OnCalendar=` expressions, in file order (a unit may have
     /// several; the timer fires at the union of all of them).
     pub on_calendar: Vec<String>,
+    /// `Persistent=`. Default `false`.
     pub persistent: bool,
+    /// `RandomizedDelaySec=`. Default zero.
     pub randomized_delay: Duration,
     /// Defaults to 1 minute, matching `systemd.timer(5)`'s documented
     /// default for `AccuracySec=`.
@@ -23,6 +25,8 @@ pub struct TimerUnit {
     /// read from files alone. Callers should report `UNSUPPORTED_TRIGGER`
     /// for a unit that has any of these and no `OnCalendar=`.
     pub unsupported_triggers: Vec<String>,
+    /// Directives inside `[Timer]` whose value could not be parsed.
+    /// The directive keeps its default.
     pub warnings: Vec<String>,
 }
 
@@ -173,6 +177,9 @@ pub fn parse_timer_unit(content: &str, file: &str) -> TimerUnit {
         }
 
         match key {
+            // systemd reads an empty assignment as "forget the earlier
+            // values of this list".
+            "OnCalendar" if value.is_empty() => unit.on_calendar.clear(),
             "OnCalendar" => unit.on_calendar.push(value.to_string()),
             "Persistent" => match parse_bool(value) {
                 Some(b) => unit.persistent = b,
@@ -213,7 +220,10 @@ pub fn effective_tolerance(base: Duration, timer: &TimerUnit) -> Duration {
 pub enum MissedRunStatus {
     /// `Persistent=true` caught the run up at boot; late by `by` relative
     /// to its original expected time.
-    LateCaughtUp { by: Duration },
+    LateCaughtUp {
+        /// How long after the original expected time the catch-up ran.
+        by: Duration,
+    },
     /// No catch-up: the run was simply missed.
     Missed,
 }
@@ -268,6 +278,16 @@ pub fn evaluate_missed_runs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_oncalendar_resets_the_list() {
+        let unit = parse_timer_unit(
+            "[Timer]\nOnCalendar=a\nOnCalendar=\nOnCalendar=*-*-* 03:00:00\n",
+            "t.timer",
+        );
+        assert_eq!(unit.on_calendar, vec!["*-*-* 03:00:00".to_string()]);
+        assert_eq!(unit.warnings, Vec::<String>::new());
+    }
 
     #[test]
     fn parses_basic_timer() {

@@ -4,15 +4,16 @@
 //! and matching work.
 //!
 //! A source named explicitly on the command line (`--crontab`,
-//! `--timer-unit`, `--syslog`, ...) that cannot be read is a hard usage
-//! error (exit 2): the user asked for it by name. So is a window whose
-//! schedules expand to more than 5,000,000 expected runs. The `--system-root`
-//! scan runs only when no `--crontab`, `--crontab-user`, or `--timer-unit`
-//! was given. It is best-effort: a missing path is silently skipped, and
-//! an unreadable one becomes a warning, because the default root is `/`
-//! and much of it may not exist or may not be readable.
+//! `--timer-unit`, `--timers-list`, `--syslog`, ...) that cannot be read
+//! is a hard usage error (exit 2): the user asked for it by name. So is a
+//! window whose schedules expand to more than 5,000,000 expected runs.
+//! The `--system-root` scan runs only when no `--crontab`,
+//! `--crontab-user`, `--timer-unit`, or `--timers-list` was given. It is
+//! best-effort: a missing path is silently skipped, and an unreadable one
+//! becomes a warning, because the default root is `/` and much of it may
+//! not exist or may not be readable.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -21,22 +22,33 @@ use jiff::Timestamp;
 
 use crate::cli::{Cli, InputPath};
 use crate::crontab::{self, describe_schedule, CronJob, ScheduleKind};
+use crate::input_limit::{self, explain_read, read_capped_file, read_capped_reader};
 use crate::ledger::{
     build_ledger_from_coverage, normalize_command, JobKey, JobSchedule, Ledger, LogCoverage,
     ScheduledJob,
 };
 use crate::log::{self, LogEvent};
+use crate::preview::{self, NextJob};
 use crate::schedule::{self, default_timezone, resolve_timezone};
 use crate::systemd;
 
+/// One finished audit: the ledger, the window it covers, and warnings
+/// from reading inputs.
 #[derive(Debug)]
 pub struct Audit {
+    /// Matched jobs and the span the logs actually cover.
     pub ledger: Ledger,
+    /// Human-readable schedule text for each job, for the report.
     pub descriptions: HashMap<JobKey, String>,
+    /// Warnings from reading inputs, in addition to `ledger.warnings`.
     pub extra_warnings: Vec<String>,
+    /// Inclusive start of the audit window.
     pub since: Timestamp,
+    /// Exclusive end of the audit window.
     pub until: Timestamp,
+    /// Timezone used to display times.
     pub tz: TimeZone,
+    /// Base matching tolerance from `--tolerance`, before a timer widens it.
     pub tolerance: Duration,
 }
 
@@ -48,51 +60,52 @@ fn resolve_timestamp(value: &str, now: Timestamp) -> Result<Timestamp, String> {
         return Ok(ts);
     }
     let ago = systemd::parse_duration(value)
-        .map_err(|_| format!("'{value}' is not an RFC3339 timestamp or a duration like '30d'"))?;
-    now.checked_sub(ago)
-        .map_err(|e| format!("'{value}' is out of range: {e}"))
+        .map_err(|_| format!("'{value}' is not an RFC3339 timestamp or a duration like '30d'; try --since 30d or --since 2026-01-01T00:00:00Z"))?;
+    now.checked_sub(ago).map_err(|e| {
+        format!("'{value}' is out of range: {e}; use a shorter duration or an RFC3339 timestamp")
+    })
 }
 
-/// Read a crontab or timer unit as text. A non-UTF-8 byte is replaced and
-/// noted as a warning, like a syslog's, so one bad byte does not fail the
-/// whole run. A missing or unreadable file is still an error. The warning
-/// names only the first invalid byte, by 1-based line and 0-based byte offset.
-fn read_text(path: &InputPath, warnings: &mut Vec<String>) -> Result<String, String> {
-    let bytes = match path {
-        InputPath::Stdin => {
-            let mut buf = Vec::new();
-            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
-                .map_err(|e| format!("cannot read <stdin>: {e}"))?;
-            buf
-        }
-        InputPath::File(p) => {
-            std::fs::read(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?
-        }
+fn read_text(path: &InputPath) -> Result<String, String> {
+    let (bytes, name) = match path {
+        InputPath::Stdin => (
+            read_capped_reader(std::io::stdin()).map_err(|e| explain_read("<stdin>", &e, true))?,
+            "<stdin>".to_string(),
+        ),
+        InputPath::File(p) => (
+            read_capped_file(p).map_err(|e| explain_read(&p.display().to_string(), &e, false))?,
+            p.display().to_string(),
+        ),
     };
-    match String::from_utf8(bytes) {
-        Ok(text) => Ok(text),
-        Err(e) => {
-            let at = e.utf8_error().valid_up_to();
-            let line = 1 + e.as_bytes()[..at].iter().filter(|&&b| b == b'\n').count();
-            warnings.push(format!(
-                "{}:{line}: invalid UTF-8 at byte {at}; replaced so the rest of the file can be read",
-                path.label(),
-            ));
-            Ok(String::from_utf8_lossy(e.as_bytes()).into_owned())
+    Ok(log::decode_text(bytes, false)
+        .map_err(|e| format!("cannot read {name}: {e}; the input must be valid UTF-8 text; convert it first, for example with iconv -f UTF-16 -t UTF-8"))?
+        .text)
+}
+
+/// Read a file found by the `--system-root` scan, with the same decoding as
+/// a named crontab. A file past the input limit is not loaded.
+fn read_scanned(path: &Path) -> Result<String, String> {
+    let bytes = read_capped_file(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::FileTooLarge {
+            format!("file is larger than {} bytes", input_limit::MAX_INPUT_BYTES)
+        } else {
+            e.to_string()
         }
-    }
+    })?;
+    Ok(log::decode_text(bytes, false)?.text)
 }
 
 fn read_log_text(path: &InputPath) -> Result<log::LogText, String> {
     match path {
         InputPath::Stdin => {
-            let mut buf = Vec::new();
-            std::io::Read::read_to_end(&mut std::io::stdin(), &mut buf)
-                .map_err(|e| format!("cannot read <stdin>: {e}"))?;
-            Ok(log::decode_log_bytes(buf))
+            let buf = read_capped_reader(std::io::stdin())
+                .map_err(|e| explain_read("<stdin>", &e, true))?;
+            log::decode_text(buf, true).map_err(|e| {
+                format!("cannot read <stdin>: {e}; the input must be valid UTF-8 or gzip text; convert it to UTF-8 and pipe it again")
+            })
         }
         InputPath::File(p) => {
-            log::read_log_source(p).map_err(|e| format!("cannot read {}: {e}", p.display()))
+            log::read_log_source(p).map_err(|e| explain_read(&p.display().to_string(), &e, false))
         }
     }
 }
@@ -103,6 +116,20 @@ fn note_invalid_utf8(warnings: &mut Vec<String>, label: &str, text: &log::LogTex
             "{label}: invalid UTF-8 at byte {at}; replaced so the rest of the log can be read"
         ));
     }
+    if text.nul_lines_skipped > 0 {
+        warnings.push(format!(
+            "{label}: {} line(s) with a NUL byte skipped; the rest of the log was read",
+            text.nul_lines_skipped
+        ));
+    }
+}
+
+fn rejected_lines(result: &crontab::ParseResult) -> Vec<String> {
+    result
+        .warnings
+        .iter()
+        .map(|w| format!("{}:{}: {}", w.file, w.line, w.message))
+        .collect()
 }
 
 /// Most expected runs one audit will hold. Past this the ledger is about
@@ -207,6 +234,31 @@ impl Collector {
         Ok(())
     }
 
+    /// A named job source (`--crontab`, `--crontab-user`, `--timer-unit`)
+    /// that adds no job is a usage error: a typo, a wrong file or an
+    /// unreadable one would otherwise report "all OK" for runs never
+    /// checked. The first few rejected lines say why.
+    fn require_jobs(
+        &self,
+        label: &str,
+        jobs_before: usize,
+        rejected: &[String],
+    ) -> Result<(), String> {
+        if self.jobs.len() > jobs_before {
+            return Ok(());
+        }
+        let mut msg = format!("{label}: no jobs found");
+        if !rejected.is_empty() {
+            msg.push_str(&format!(
+                " ({} line(s) rejected, first: {})",
+                rejected.len(),
+                rejected[0]
+            ));
+        }
+        msg.push_str("; check that this is a crontab with at least one schedule line");
+        Err(msg)
+    }
+
     fn add_parse_result(
         &mut self,
         result: crontab::ParseResult,
@@ -240,6 +292,14 @@ impl Collector {
             })
             .or_insert(description);
     }
+}
+
+fn describe_listed_timer(last: Option<Timestamp>, next: Option<Timestamp>) -> String {
+    let stamp = |ts: Option<Timestamp>| match ts {
+        Some(ts) => ts.to_string(),
+        None => "n/a".to_string(),
+    };
+    format!("list-timers LAST {} NEXT {}", stamp(last), stamp(next))
 }
 
 fn derive_service_unit(path: &InputPath) -> String {
@@ -338,9 +398,237 @@ fn collect_files(
     unread
 }
 
+/// Why [`build`] failed: one message plus optional detail lines. The
+/// caller prints the details on lines of their own, so a newline inside
+/// a path or a warning can never pass for a separate message.
+#[derive(Debug)]
+pub struct BuildError {
+    /// The one-line failure. Printed first.
+    pub message: String,
+    /// Extra lines the caller prints under `message`.
+    pub details: Vec<String>,
+}
+
+impl From<String> for BuildError {
+    fn from(message: String) -> Self {
+        BuildError {
+            message,
+            details: Vec::new(),
+        }
+    }
+}
+
+impl std::fmt::Display for BuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)?;
+        for d in &self.details {
+            write!(f, "\n  - {d}")?;
+        }
+        Ok(())
+    }
+}
+
+fn no_jobs_message(label: &str, rejected: &[String]) -> String {
+    let mut msg = format!("{label}: no jobs found");
+    if !rejected.is_empty() {
+        msg.push_str(&format!(
+            " ({} line(s) rejected, first: {})",
+            rejected.len(),
+            rejected[0]
+        ));
+    }
+    msg.push_str("; check that this is a crontab with at least one schedule line");
+    msg
+}
+
+fn schedule_zone(job: &CronJob, default_tz: &TimeZone, warnings: &mut Vec<String>) -> TimeZone {
+    match job.effective_tz() {
+        Some(name) => match resolve_timezone(name) {
+            Ok(tz) => tz,
+            Err(e) => {
+                warnings.push(format!("{}:{}: {e}", job.file, job.line));
+                default_tz.clone()
+            }
+        },
+        None => default_tz.clone(),
+    }
+}
+
+fn push_cron_preview(
+    jobs: &mut Vec<NextJob>,
+    warnings: &mut Vec<String>,
+    parsed: crontab::ParseResult,
+    default_tz: &TimeZone,
+    at: Timestamp,
+) {
+    for w in &parsed.warnings {
+        warnings.push(format!("{}:{}: {}", w.file, w.line, w.message));
+    }
+    for job in &parsed.jobs {
+        let schedule_tz = schedule_zone(job, default_tz, warnings);
+        let next = preview::next_cron(job, &schedule_tz, at);
+        if matches!(job.schedule, ScheduleKind::Standard(_)) && next.is_none() {
+            warnings.push(format!(
+                "{}:{}: schedule can never run (no such date exists)",
+                job.file, job.line
+            ));
+        }
+        let schedule = match &job.schedule {
+            ScheduleKind::Reboot => "@reboot".to_string(),
+            ScheduleKind::Standard(s) => describe_schedule(s),
+        };
+        let user = job.user.clone().unwrap_or_default();
+        jobs.push(NextJob {
+            label: format!("{user}: {}", normalize_command(&job.command)),
+            file: job.file.clone(),
+            line: job.line,
+            schedule,
+            next,
+        });
+    }
+}
+
+/// Next run of each named crontab or timer, at or after `at_text`.
+///
+/// `at_text` is an RFC3339 instant from the caller. This function does not
+/// read the machine clock. `--tz` is required: times are printed in that
+/// zone. A job's `CRON_TZ` still decides when that job fires. A plain
+/// `TZ=` line does not. The system root is not scanned, so a host crontab
+/// is not added.
+pub fn preview(cli: &Cli, at_text: &str) -> Result<preview::NextPreview, BuildError> {
+    let at: Timestamp = at_text.parse().map_err(|_| {
+        format!(
+            "'{at_text}' is not an RFC3339 timestamp; --next takes the instant from you, for example --next 2026-10-20T00:00:00Z"
+        )
+    })?;
+    let tz = match cli.tz.as_deref() {
+        Some(name) if !name.is_empty() => resolve_timezone(name)?,
+        _ => {
+            return Err(
+                "--next needs an explicit --tz, for example --tz UTC or --tz Europe/Amsterdam"
+                    .to_string()
+                    .into(),
+            );
+        }
+    };
+    if cli.crontabs.is_empty() && cli.crontab_users.is_empty() && cli.timer_units.is_empty() {
+        return Err(
+            "--next needs a crontab or a timer unit; pass --crontab PATH, --crontab-user USER=PATH, or --timer-unit PATH. --next does not scan --system-root"
+                .to_string()
+                .into(),
+        );
+    }
+
+    let mut jobs = Vec::new();
+    let mut warnings = Vec::new();
+
+    for path in &cli.crontabs {
+        let content = read_text(path)?;
+        let label = path.label();
+        let parsed = crontab::parse_system_crontab(&content, &label);
+        let rejected = rejected_lines(&parsed);
+        let before = jobs.len();
+        push_cron_preview(&mut jobs, &mut warnings, parsed, &tz, at);
+        if jobs.len() == before {
+            return Err(no_jobs_message(&label, &rejected).into());
+        }
+    }
+
+    for (user, path) in &cli.crontab_users {
+        let content = read_text(path)?;
+        let label = path.label();
+        let parsed = crontab::parse_user_crontab(&content, &label, Some(user));
+        let rejected = rejected_lines(&parsed);
+        let before = jobs.len();
+        push_cron_preview(&mut jobs, &mut warnings, parsed, &tz, at);
+        if jobs.len() == before {
+            return Err(no_jobs_message(&label, &rejected).into());
+        }
+    }
+
+    for path in &cli.timer_units {
+        let content = read_text(path)?;
+        let label = path.label();
+        let timer = systemd::parse_timer_unit(&content, &label);
+        if timer.on_calendar.is_empty() && timer.unsupported_triggers.is_empty() {
+            let why = timer.warnings.first().map(|w| format!(", first: {w}"));
+            return Err(format!(
+                "{label}: no jobs found (no OnCalendar= or other trigger in a [Timer] section{}); pass a .timer unit file",
+                why.unwrap_or_default()
+            )
+            .into());
+        }
+        warnings.extend(timer.warnings.iter().cloned());
+        let unit_name = timer
+            .unit
+            .clone()
+            .unwrap_or_else(|| derive_service_unit(path));
+        if timer.on_calendar.is_empty() {
+            jobs.push(NextJob {
+                label: unit_name,
+                file: label,
+                line: 0,
+                schedule: format!("unsupported: {}", timer.unsupported_triggers.join(", ")),
+                next: None,
+            });
+            continue;
+        }
+
+        let mut next: Option<Timestamp> = None;
+        let mut any_parsed = false;
+        let mut any_elapse = false;
+        let mut first_error: Option<String> = None;
+        for cal_str in &timer.on_calendar {
+            match systemd::parse_calendar(cal_str) {
+                Ok(cal) => {
+                    any_parsed = true;
+                    match systemd::first_calendar_on_or_after(&cal, &tz, at) {
+                        Ok(Some(t)) => {
+                            any_elapse = true;
+                            next = Some(next.map_or(t, |prev| prev.min(t)));
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            let msg = format!("OnCalendar '{cal_str}': {e}");
+                            first_error.get_or_insert_with(|| msg.clone());
+                            warnings.push(format!("{label}: {msg}"));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("OnCalendar '{cal_str}': {e}");
+                    first_error.get_or_insert_with(|| msg.clone());
+                    warnings.push(format!("{label}: {msg}"));
+                }
+            }
+        }
+        if !any_parsed && timer.unsupported_triggers.is_empty() {
+            return Err(format!(
+                "{label}: no jobs found (no valid OnCalendar=, first: {}); fix the OnCalendar= value in the unit",
+                first_error.unwrap_or_default()
+            )
+            .into());
+        }
+        if any_parsed && !any_elapse {
+            warnings.push(format!(
+                "{label}: OnCalendar schedule can never run (no such date exists)"
+            ));
+        }
+        jobs.push(NextJob {
+            label: unit_name,
+            file: label,
+            line: 0,
+            schedule: timer.on_calendar.join("; "),
+            next,
+        });
+    }
+
+    Ok(preview::render(&jobs, at, &tz, &warnings))
+}
+
 /// Build the ledger for `cli`, using `now` as "the current time" for a
 /// relative `--since`/`--until` and a defaulted `--until`.
-pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
+pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, BuildError> {
     let tz = match &cli.tz {
         Some(name) => resolve_timezone(name)?,
         None => default_timezone(),
@@ -353,9 +641,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     // An equal bound is an empty window and still a normal audit. An
     // inverted one expands to nothing and would otherwise exit 0.
     if until < since {
-        return Err(format!(
-            "--until ({until}) is earlier than --since ({since})"
-        ));
+        return Err(format!("--until ({until}) is earlier than --since ({since}); swap them or choose a later --until").into());
     }
     let tolerance = cli.tolerance;
 
@@ -374,38 +660,57 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     let mut coverage = LogCoverage::default();
 
     for path in &cli.crontabs {
-        let content = read_text(path, &mut c.warnings)?;
+        let content = read_text(path)?;
         let label = path.label();
         let parsed = crontab::parse_system_crontab(&content, &label);
+        let before = c.jobs.len();
+        let rejected = rejected_lines(&parsed);
         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
+        c.require_jobs(&label, before, &rejected)?;
     }
 
     for (user, path) in &cli.crontab_users {
-        let content = read_text(path, &mut c.warnings)?;
+        let content = read_text(path)?;
         let label = path.label();
         let parsed = crontab::parse_user_crontab(&content, &label, Some(user));
+        let before = c.jobs.len();
+        let rejected = rejected_lines(&parsed);
         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
+        c.require_jobs(&label, before, &rejected)?;
     }
 
     // --system-root is the fallback source. A named --crontab,
     // --crontab-user, or --timer-unit is the whole set of jobs: also
     // walking the root would schedule a file the user already named a
-    // second time. Naming --system-root by itself still scans that
-    // directory. A missing path stays silent; an unreadable file or
-    // directory is a warning, never a hard error.
-    let named_job_source =
-        !cli.crontabs.is_empty() || !cli.crontab_users.is_empty() || !cli.timer_units.is_empty();
+    // second time. `--timers-list` is a named job source for the same
+    // reason: the saved listing is the audit, and the machine's own
+    // crontabs are not added on top. Naming --system-root by itself
+    // still scans that directory. A missing path stays silent; an
+    // unreadable file or directory is a warning, never a hard error.
+    let named_job_source = !cli.crontabs.is_empty()
+        || !cli.crontab_users.is_empty()
+        || !cli.timer_units.is_empty()
+        || !cli.timers_list.is_empty();
     if !named_job_source {
         let root = &cli.system_root;
+        if !root.is_dir() {
+            return Err(format!("--system-root {}: not a directory; pass the root directory of a system tree, or drop --system-root", root.display()).into());
+        }
+        let mut scanned_files = 0usize;
+        let mut scan_failed = 0usize;
         let etc_crontab = root.join("etc/crontab");
         if etc_crontab.is_file() {
-            match std::fs::read_to_string(&etc_crontab) {
+            match read_scanned(&etc_crontab) {
                 Ok(content) => {
+                    scanned_files += 1;
                     let label = etc_crontab.display().to_string();
                     let parsed = crontab::parse_system_crontab(&content, &label);
                     c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                 }
-                Err(e) => c.warnings.push(format!("{}: {e}", etc_crontab.display())),
+                Err(e) => {
+                    scan_failed += 1;
+                    c.warnings.push(format!("{}: {e}", etc_crontab.display()));
+                }
             }
         }
 
@@ -413,6 +718,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         if cron_d.is_dir() {
             let mut files = Vec::new();
             for (path, e) in collect_files(&cron_d, false, &mut files) {
+                scan_failed += 1;
                 c.warnings.push(format!("{}: {e}", path.display()));
             }
             for file in files {
@@ -432,13 +738,17 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                     }
                     CronDFileName::Accepted => {}
                 }
-                match std::fs::read_to_string(&file) {
+                match read_scanned(&file) {
                     Ok(content) => {
+                        scanned_files += 1;
                         let label = file.display().to_string();
                         let parsed = crontab::parse_system_crontab(&content, &label);
                         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                     }
-                    Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
+                    Err(e) => {
+                        scan_failed += 1;
+                        c.warnings.push(format!("{}: {e}", file.display()));
+                    }
                 }
             }
         }
@@ -447,30 +757,64 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
         if spool.is_dir() {
             let mut files = Vec::new();
             for (path, e) in collect_files(&spool, true, &mut files) {
+                scan_failed += 1;
                 c.warnings.push(format!("{}: {e}", path.display()));
             }
             for file in files {
-                let user = file
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                match std::fs::read_to_string(&file) {
+                let Some(user) = file.file_name().and_then(|n| n.to_str()) else {
+                    // A spool file is named after its user. Without a valid
+                    // name the job would run as someone unknown, so it is
+                    // not audited as user "" (that never matches a log).
+                    c.warnings.push(format!(
+                        "{}: file name is not valid UTF-8, so its user is unknown; skipped, but it may be an unaudited job",
+                        file.display()
+                    ));
+                    continue;
+                };
+                let user = user.to_string();
+                match read_scanned(&file) {
                     Ok(content) => {
+                        scanned_files += 1;
                         let label = file.display().to_string();
                         let parsed = crontab::parse_user_crontab(&content, &label, Some(&user));
                         c.add_parse_result(parsed, &tz, since, until, tolerance)?;
                     }
-                    Err(e) => c.warnings.push(format!("{}: {e}", file.display())),
+                    Err(e) => {
+                        scan_failed += 1;
+                        c.warnings.push(format!("{}: {e}", file.display()));
+                    }
                 }
             }
+        }
+
+        if scanned_files == 0 && scan_failed == 0 {
+            c.warnings.push(format!(
+                "--system-root {}: no crontab file found",
+                root.display()
+            ));
+        } else if scanned_files == 0 {
+            return Err(BuildError {
+                message: format!(
+                    "--system-root {}: no jobs found (no readable crontab file); fix the permissions listed below or pass a crontab with --crontab",
+                    root.display()
+                ),
+                details: c.warnings.clone(),
+            });
         }
     }
 
     for path in &cli.timer_units {
-        let content = read_text(path, &mut c.warnings)?;
+        let content = read_text(path)?;
         let label = path.label();
         let timer = systemd::parse_timer_unit(&content, &label);
+        if timer.on_calendar.is_empty() && timer.unsupported_triggers.is_empty() {
+            let why = timer.warnings.first().map(|w| format!(", first: {w}"));
+            return Err(format!(
+                "{label}: no jobs found (no OnCalendar= or other trigger in a [Timer] section{}); pass a .timer unit file",
+                why.unwrap_or_default()
+            )
+            .into());
+        }
         c.warnings.extend(timer.warnings.clone());
 
         let unit_name = timer
@@ -523,6 +867,7 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
             // matching systemd's "Next elapse: never" (breaktest-cronledger-0005).
             let mut any_calendar_ever_elapses = false;
             let mut any_calendar_parsed = false;
+            let mut first_calendar_error: Option<String> = None;
             for cal_str in &timer.on_calendar {
                 match systemd::parse_calendar(cal_str) {
                     Ok(cal) => {
@@ -555,10 +900,19 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
                                 .push(format!("{label}: OnCalendar '{cal_str}': {e}")),
                         }
                     }
-                    Err(e) => c
-                        .warnings
-                        .push(format!("{label}: OnCalendar '{cal_str}': {e}")),
+                    Err(e) => {
+                        let msg = format!("OnCalendar '{cal_str}': {e}");
+                        first_calendar_error.get_or_insert_with(|| msg.clone());
+                        c.warnings.push(format!("{label}: {msg}"));
+                    }
                 }
+            }
+            if !any_calendar_parsed && timer.unsupported_triggers.is_empty() {
+                return Err(format!(
+                    "{label}: no jobs found (no valid OnCalendar=, first: {}); fix the OnCalendar= value in the unit",
+                    first_calendar_error.unwrap_or_default()
+                )
+                .into());
             }
             if any_calendar_parsed && all_times.is_empty() && !any_calendar_ever_elapses {
                 c.warnings.push(format!(
@@ -581,10 +935,64 @@ pub fn build(cli: &Cli, now: Timestamp) -> Result<Audit, String> {
     }
 
     for path in &cli.timers_list {
-        c.warnings.push(format!(
-            "{}: --timers-list input is not implemented yet; ignored",
-            path.label()
-        ));
+        let content = read_text(path)?;
+        let label = path.label();
+        let parsed = systemd::parse_list_timers(&content, &label, &tz);
+        let mut file_warnings = parsed.warnings;
+        let before = c.jobs.len();
+        let mut seen_units = HashSet::new();
+        for row in parsed.timers {
+            if !seen_units.insert(row.unit.clone()) {
+                file_warnings.push(format!(
+                    "{label}:{}: {}: duplicate unit; skipped",
+                    row.line, row.unit
+                ));
+                continue;
+            }
+            let schedule =
+                match systemd::evaluate_listed_timer(row.last, row.next, until, tolerance) {
+                    systemd::ListedTimerVerdict::NothingToCheck => {
+                        file_warnings.push(format!(
+                            "{label}:{}: {}: NEXT and LAST give nothing to check; skipped",
+                            row.line, row.unit
+                        ));
+                        continue;
+                    }
+                    systemd::ListedTimerVerdict::Current { last } => JobSchedule::ListedTimer {
+                        last: Some(last),
+                        overdue: None,
+                    },
+                    systemd::ListedTimerVerdict::OlderThanExpected { last, expected } => {
+                        JobSchedule::ListedTimer {
+                            last,
+                            overdue: Some(expected),
+                        }
+                    }
+                };
+            c.account_expected_runs(&label, 1)?;
+            let key = JobKey::Timer {
+                unit: row.unit.clone(),
+            };
+            c.merge_description(&key, describe_listed_timer(row.last, row.next));
+            c.jobs.push(ScheduledJob {
+                key,
+                file: label.clone(),
+                line: row.line,
+                schedule,
+                tolerance,
+                persistent: false,
+                next_after_window: None,
+            });
+        }
+        if c.jobs.len() == before {
+            return Err(BuildError {
+                message: format!(
+                    "{label}: no jobs found; pass the output of systemctl list-timers --all"
+                ),
+                details: file_warnings,
+            });
+        }
+        c.warnings.extend(file_warnings);
     }
 
     for path in &cli.syslogs {
@@ -658,10 +1066,13 @@ mod tests {
     fn resolve_timestamp_rejects_garbage() {
         let now = ts("2026-10-22T00:00:00Z");
         let err = resolve_timestamp("banana", now).unwrap_err();
-        assert_eq!(
-            err,
-            "'banana' is not an RFC3339 timestamp or a duration like '30d'"
+        // The documented sentence stays the start of the message; the
+        // next step follows it.
+        assert!(
+            err.starts_with("'banana' is not an RFC3339 timestamp or a duration like '30d'"),
+            "{err}"
         );
+        assert!(err.contains("try --since 30d"), "{err}");
     }
 
     #[test]
@@ -672,7 +1083,9 @@ mod tests {
             crontabs: vec![InputPath::File(PathBuf::from("/nonexistent/crontab"))],
             ..Cli::default()
         };
-        let err = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap_err();
+        let err = build(&cli, ts("2026-10-22T00:00:00Z"))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("/nonexistent/crontab"));
     }
 
@@ -688,6 +1101,8 @@ mod tests {
         };
         let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
         assert!(audit.ledger.entries.is_empty());
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(warnings.contains("no crontab file found"), "{warnings}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1074,44 +1489,6 @@ mod tests {
         assert!(
             !warnings.contains("never"),
             "29 February must not be flagged as never running: {warnings}"
-        );
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn unknown_timezone_name_does_not_also_warn_that_the_schedule_never_runs() {
-        // Regression: an unresolvable timezone name used to parse `Ok`,
-        // so the end-of-loop "can never run" check in app.rs could not
-        // tell it apart from a genuinely impossible date and added a
-        // second, misleading warning on top of the real "unknown
-        // timezone" one. See breaktest-cronledger-0008.
-        let dir =
-            std::env::temp_dir().join(format!("cron-ledger-app-bad-tz-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let timer_path = dir.join("d.timer");
-        std::fs::write(
-            &timer_path,
-            "[Timer]\nOnCalendar=*-*-* 12:00:00 Mars/Nonexistent\nUnit=d.service\n",
-        )
-        .unwrap();
-
-        let cli = Cli {
-            since: "2026-10-20T00:00:00Z".to_string(),
-            until: Some("2026-10-21T00:00:00Z".to_string()),
-            tz: Some("UTC".to_string()),
-            system_root: dir.clone(),
-            timer_units: vec![InputPath::File(timer_path)],
-            ..Cli::default()
-        };
-        let audit = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap();
-        let warnings = audit.extra_warnings.join("\n");
-        assert!(
-            warnings.contains("unknown timezone"),
-            "expected the real diagnosis, got: {warnings}"
-        );
-        assert!(
-            !warnings.contains("can never run"),
-            "unknown timezone should not also claim the schedule can never run, got: {warnings}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1612,6 +1989,8 @@ mod tests {
             "0 5 * * * /usr/local/bin/alice.sh\n",
         )
         .unwrap();
+        std::fs::create_dir_all(root.join("etc")).unwrap();
+        std::fs::write(root.join("etc/crontab"), "# no jobs\n").unwrap();
         std::fs::set_permissions(&crontabs, std::fs::Permissions::from_mode(0o000)).unwrap();
         // Root can list a mode 000 directory, so the warning would not
         // appear. Skip rather than fail.
@@ -1788,7 +2167,9 @@ mod tests {
             crontabs: vec![InputPath::File(crontab_path)],
             ..Cli::default()
         };
-        let err = build(&cli, ts("2026-10-22T00:00:00Z")).unwrap_err();
+        let err = build(&cli, ts("2026-10-22T00:00:00Z"))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("5000001"), "{err}");
         assert!(err.contains("5000000"), "{err}");
         assert!(err.contains("crontab"), "{err}");
@@ -1816,6 +2197,92 @@ mod tests {
             panic!("expected a standard outcome");
         };
         assert_eq!(outcomes.len(), 5_000_000);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_timers_list_is_a_usage_error() {
+        let cli = Cli {
+            since: "2026-10-23T00:00:00Z".to_string(),
+            until: Some("2026-10-25T00:00:00Z".to_string()),
+            timers_list: vec![InputPath::File(PathBuf::from(
+                "/nonexistent/cron-ledger-list-timers.txt",
+            ))],
+            system_root: PathBuf::from("/nonexistent/cron-ledger-root"),
+            ..Cli::default()
+        };
+        let err = build(&cli, ts("2026-10-26T00:00:00Z"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot read"), "{err}");
+        assert!(err.contains("list-timers.txt"), "{err}");
+        assert!(!err.contains("not a directory"), "{err}");
+    }
+
+    #[test]
+    fn timers_list_does_not_scan_the_system_root() {
+        let dir = std::env::temp_dir().join(format!(
+            "cron-ledger-app-timers-list-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("etc")).unwrap();
+        std::fs::write(dir.join("etc/crontab"), "0 3 * * * root /bin/backup.sh\n").unwrap();
+        let list = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/systemd/list-timers.txt");
+        let cli = Cli {
+            since: "2026-10-23T00:00:00Z".to_string(),
+            until: Some("2026-10-25T00:00:00Z".to_string()),
+            tz: Some("UTC".to_string()),
+            system_root: dir.clone(),
+            timers_list: vec![InputPath::File(list)],
+            ..Cli::default()
+        };
+        let audit = build(&cli, ts("2026-10-26T00:00:00Z")).unwrap();
+        assert!(
+            audit
+                .ledger
+                .entries
+                .iter()
+                .all(|entry| matches!(entry.key, JobKey::Timer { .. })),
+            "the system crontab must not be added: {:?}",
+            audit.ledger.entries
+        );
+        assert_eq!(audit.ledger.entries.len(), 2);
+        let logrotate = audit
+            .ledger
+            .entries
+            .iter()
+            .find(|entry| matches!(&entry.key, JobKey::Timer { unit } if unit == "logrotate.timer"))
+            .expect("logrotate.timer");
+        let crate::ledger::JobOutcome::Standard(outcomes) = &logrotate.outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Ok);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-24T00:00:00Z")));
+        let backup = audit
+            .ledger
+            .entries
+            .iter()
+            .find(|entry| matches!(&entry.key, JobKey::Timer { unit } if unit == "backup.timer"))
+            .expect("backup.timer");
+        let crate::ledger::JobOutcome::Standard(outcomes) = &backup.outcome else {
+            panic!("expected a standard outcome");
+        };
+        assert_eq!(outcomes[0].status, crate::ledger::Status::Missed);
+        assert_eq!(outcomes[0].actual, Some(ts("2026-10-23T06:00:00Z")));
+        assert_eq!(outcomes[0].expected, ts("2026-10-24T12:00:00Z"));
+        let warnings = audit.extra_warnings.join("\n");
+        assert!(warnings.contains("pending.timer"), "{warnings}");
+        assert!(warnings.contains("idle.timer"), "{warnings}");
+        assert!(
+            !audit
+                .ledger
+                .warnings
+                .iter()
+                .any(|w| w.contains("no log events found")),
+            "list-timers is not log evidence: {:?}",
+            audit.ledger.warnings
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

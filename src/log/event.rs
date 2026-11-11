@@ -20,21 +20,32 @@ pub enum EventSource {
     /// of users and commands once per run, so sharing the allocation
     /// keeps that from growing with the line count.
     CronCmd {
+        /// User named in the `CMD` line.
         user: Rc<str>,
+        /// Process id from `CRON[pid]` or `CROND[pid]`, when the line has one.
         pid: Option<u32>,
+        /// Command text inside `CMD (...)`.
         command: Rc<str>,
     },
     /// cronie-only: a line of the command's captured output
     /// (`CMDOUT (...)`). Not a run instant by itself; kept only so a
     /// matcher can tell a job produced output.
-    CronCmdOut { user: Rc<str>, pid: Option<u32> },
+    CronCmdOut {
+        /// User named on the `CMDOUT` line.
+        user: Rc<str>,
+        /// Process id, when the line has one.
+        pid: Option<u32>,
+    },
     /// cronie-only: the command finished (`CMDEND (...)`). Real-world
     /// cronie `CMDEND` lines do not carry a numeric exit code (confirmed
     /// against published `/var/log/cron` examples); this only marks that
     /// the run completed.
     CronCmdEnd {
+        /// User named on the `CMDEND` line.
         user: Rc<str>,
+        /// Process id, when the line has one.
         pid: Option<u32>,
+        /// Command text, when the line includes it.
         command: Rc<str>,
     },
     /// A systemd timer-activated service run, from the manager's own
@@ -42,14 +53,20 @@ pub enum EventSource {
     /// `Finished ...` is a separate run only when this activation did not
     /// already log `Started ...`. The subject unit is `UNIT` when present,
     /// otherwise `_SYSTEMD_UNIT`.
-    SystemdUnitStart { unit: String },
+    SystemdUnitStart {
+        /// Unit that started, from `UNIT` or `_SYSTEMD_UNIT`.
+        unit: String,
+    },
     /// A boot whose start the journal actually shows. `_BOOT_ID` only
     /// names the boot. The timestamp is the entry that carries the
     /// evidence: a kernel banner (`Linux version`, `Booting Linux`,
     /// `Booting paravirtualized kernel`) or any entry journald received
     /// within two minutes of `CLOCK_MONOTONIC` zero. Used for `@reboot`'s
     /// informational `REBOOT_ONLY` list and for a `Persistent=` catch-up.
-    Boot { boot_id: Option<String> },
+    Boot {
+        /// Journal `_BOOT_ID`, when the entry has one.
+        boot_id: Option<String>,
+    },
 }
 
 /// Whether a job's own exit status is known, and to what precision.
@@ -70,13 +87,16 @@ pub enum ExitStatus {
 /// One recognized log line.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LogEvent {
+    /// When the line was logged.
     pub timestamp: Timestamp,
+    /// What the line is evidence of.
     pub source: EventSource,
     /// Shared between every event parsed from the same file: a syslog or
     /// journal file can produce millions of events, and they all carry
     /// the identical path, so cloning an `Rc` keeps that label at O(1)
     /// instead of reallocating it once per line.
     pub file: Rc<str>,
+    /// 1-based line number in `file`.
     pub line: usize,
 }
 
@@ -85,8 +105,11 @@ pub struct LogEvent {
 /// never fatal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LogWarning {
+    /// Path of the log this line came from.
     pub file: String,
+    /// 1-based line number in `file`.
     pub line: usize,
+    /// Why the line could not be parsed further.
     pub message: String,
 }
 
@@ -96,7 +119,9 @@ pub struct LogWarning {
 /// not counted as a warning).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct LogParseResult {
+    /// Recognized lines, in file order.
     pub events: Vec<LogEvent>,
+    /// Lines that looked relevant but could not be parsed. Not fatal.
     pub warnings: Vec<LogWarning>,
     /// Timestamps of every journal entry that parsed as an object with a
     /// usable `__REALTIME_TIMESTAMP`, whether or not it became an event.

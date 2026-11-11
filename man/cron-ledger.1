@@ -1,0 +1,322 @@
+.TH CRON-LEDGER 1 "2026-11-08" "cron-ledger 1.0.0" "User Commands"
+.SH NAME
+cron-ledger \- compare crontab and timer schedules with a saved log
+.SH SYNOPSIS
+.nf
+cron-ledger [--crontab PATH|-]... [--crontab-user USER=PATH]... [--system-root DIR]
+            [--timer-unit PATH]... [--timers-list PATH|-]...
+            [--syslog PATH|-]... [--journal-json PATH|-]...
+            --since <RFC3339|30d> [--until <RFC3339|30d>] [--tz Europe/Amsterdam]
+            [--tolerance 5m] [--json | --csv] [--output PATH] [--quiet | --verbose] [-h | --help]
+cron-ledger --diff OLD.json NEW.json
+cron-ledger --next <RFC3339> --tz <UTC|Europe/Amsterdam> [--crontab PATH|-]...
+            [--crontab-user USER=PATH]... [--timer-unit PATH]... [--output PATH]
+            [--quiet | --verbose]
+.fi
+.SH DESCRIPTION
+cron-ledger reads saved crontab files and systemd timer units, works out when each job should have run in a time window, and compares that with a saved syslog or journal.
+It reports
+.B OK ,
+.B LATE ,
+.B MISSED ,
+or
+.B NO_TRACE .
+It is an after the fact check of files you pass in.
+It does not watch a live system, does not run systemctl, and does not write a crontab or any path under /etc.
+.PP
+A single
+.B -
+as a path reads standard input.
+At most one path in the whole command may be
+.BR - .
+.PP
+The text report uses color only when standard output is a terminal and
+.B NO_COLOR
+is unset.
+.B --json
+selects the JSON report instead
+.RI ( schema_version
+1).
+.SH OPTIONS
+.TP
+.B -h\fR, \fB--help
+.RB "Print the usage text on stdout and exit 0. Every other option is ignored when " --help " is given."
+.TP
+.B --crontab \fIPATH\fR|\fB-\fR
+System crontab: five schedule fields, a user, then the command.
+Repeatable.
+.I PATH
+may be
+.B -
+to read stdin.
+.TP
+.B --crontab-user \fIUSER\fR=\fIPATH\fR
+Per-user crontab for
+.I USER
+(the file has no user column).
+.I USER
+must be non-empty.
+Repeatable.
+.I PATH
+may be
+.B -
+to read stdin.
+.TP
+.B --system-root \fIDIR\fR
+Directory laid out like a system root.
+The default is
+.BR / .
+It is scanned only when the command names no
+.BR --crontab ,
+.BR --crontab-user ,
+.BR --timer-unit ,
+or
+.BR --timers-list .
+The scan reads
+.IR DIR/etc/crontab ,
+files in
+.IR DIR/etc/cron.d ,
+and files under
+.IR DIR/var/spool/cron .
+When the scan runs, a
+.I DIR
+that is not a directory exits 2.
+When a named job source is given,
+.I DIR
+is not read.
+.TP
+.B --timer-unit \fIPATH\fR
+A systemd
+.I .timer
+unit file.
+Repeatable.
+.I PATH
+may be
+.B -
+to read stdin.
+.B OnCalendar=
+schedules are expanded.
+A unit with only a monotonic trigger
+.RB ( OnBootSec=
+or similar) is reported
+.B UNSUPPORTED_TRIGGER
+and does not by itself change the exit code.
+A named unit that yields no job exits 2.
+.TP
+.B --timers-list \fIPATH\fR|\fB-\fR
+A saved timer listing with LAST, NEXT, and UNIT columns.
+Repeatable.
+.I PATH
+may be
+.B -
+to read stdin.
+The program does not run systemctl and does not match these rows against the log.
+When NEXT is earlier than
+.B --until
+by more than
+.BR --tolerance ,
+and LAST is missing or earlier than that NEXT by more than
+.BR --tolerance ,
+the row is
+.BR MISSED .
+Otherwise a present LAST is
+.BR OK .
+A row with neither time is skipped.
+A file with no usable row exits 2.
+.TP
+.B --syslog \fIPATH\fR|\fB-\fR
+A saved syslog or cron log (Debian/Ubuntu or RHEL/cronie text: RFC3164, RFC5424, or an rsyslog file-format timestamp).
+A name ending in
+.I .gz
+is decompressed.
+Repeatable.
+.I PATH
+may be
+.B -
+to read stdin.
+.TP
+.B --journal-json \fIPATH\fR|\fB-\fR
+A saved journal export, one JSON object per line, as produced by
+.B journalctl -o json\fR.
+Repeatable.
+.I PATH
+may be
+.B -
+to read stdin.
+A line that repeats a key is skipped and is not evidence.
+.TP
+.B --since \fIRFC3339\fR|\fI30d\fR
+Start of the window.
+Required.
+An RFC3339 timestamp, kept as given, or a
+.I systemd.time(7)
+duration counted back from now (for example
+.I 30d
+or
+.IR 2h ).
+Any other value exits 2.
+.TP
+.B --until \fIRFC3339\fR|\fI30d\fR
+End of the window, same form as
+.BR --since .
+The default is the current time.
+The window is half-open: an expected run at
+.B --until
+is outside it.
+A value earlier than
+.B --since
+exits 2.
+An equal value is an empty window and still an audit.
+.TP
+.B --tz \fIZONE\fR
+Timezone for schedule expansion and for syslog lines that carry no zone.
+An IANA name, for example
+.IR Europe/Amsterdam .
+The default is the system timezone, or UTC when that cannot be read.
+An unknown name exits 2.
+A
+.B CRON_TZ=
+line in a crontab overrides this for that line.
+.TP
+.B --tolerance \fISPAN\fR
+How far a log event may fall after the expected time and still count as
+.BR OK .
+A
+.I systemd.time(7)
+span.
+The default is
+.I 5m
+(five minutes).
+An event later than that is
+.BR LATE .
+.TP
+.B --json
+Write the report as one JSON document
+.RI ( schema_version
+1) instead of the text report.
+.TP
+.B --csv
+Write the report as CSV (RFC 4180, one row per audited run) instead of the text report.
+Cannot be combined with
+.BR --json .
+.TP
+.B --output \fIPATH\fR
+Write the report to
+.I PATH
+instead of standard output.
+An existing file is replaced.
+If the parent directory does not exist, the program exits 2 and does not create it.
+.TP
+.B --quiet
+Hide the usage text after an error, even when stderr is a terminal.
+No context line.
+.TP
+.B --verbose
+Print the usage text after an error, and on success one context line on stderr, even when stderr is a pipe.
+.TP
+.B --next \fIRFC3339\fR
+Print the next run of each named crontab or timer unit at or after this instant.
+The value is an RFC3339 timestamp.
+A duration is rejected, so the machine clock is not read.
+.B --tz
+is required, for example
+.I UTC
+or
+.IR Europe/Amsterdam .
+Times are printed in that zone.
+A
+.B CRON_TZ=
+line still decides when that job fires.
+A plain
+.B TZ=
+line does not.
+Pass
+.BR --crontab ,
+.B --crontab-user
+or
+.BR --timer-unit .
+.B --next
+does not scan
+.B --system-root
+and does not read a log.
+Exit 0 when the preview is printed.
+.TP
+.B --diff \fIOLD.json\fR \fINEW.json\fR
+Compare two saved
+.B --json
+reports and list added and removed jobs and runs whose status changed.
+Besides
+.B --quiet
+and
+.BR --verbose ,
+it takes no other option and reads no crontab or log.
+Exit 0 when the reports match, 1 when they differ, 2 on an input error.
+.SH EXIT STATUS
+.TP
+.B 0
+Every audited run is
+.BR OK .
+.B REBOOT_ONLY
+and
+.B UNSUPPORTED_TRIGGER
+are informational and do not change this code.
+A
+.B --next
+preview also exits 0 when it is printed.
+It is not an audit.
+.TP
+.B 1
+At least one
+.B MISSED
+or
+.B LATE
+(including a persistent timer caught up after boot).
+.TP
+.B 2
+Usage or input/output error.
+That includes an unknown argument, a missing
+.BR --since ,
+a
+.B --since
+or
+.B --until
+value that is neither RFC3339 nor a duration, a
+.B --until
+earlier than
+.BR --since ,
+more than one stdin source, an argument that is not valid UTF-8, a named file that cannot be read, a named source that yields no job, a
+.B --system-root
+that is not a directory when the scan runs (or a scan that found crontab files and could read none of them), a window that would expand past 5000000 expected runs, a file, a scanned crontab, a --diff report, or standard input larger than 268435456 bytes (256 MiB), or a report that cannot be written.
+The oversized input is not loaded.
+.TP
+.B 3
+No
+.B MISSED
+or
+.BR LATE ,
+and at least one
+.BR NO_TRACE .
+.TP
+.B 130
+SIGINT.
+The report is not left half-written.
+An existing
+.B --output
+file is kept when the new report was not finished, and nothing is written to stdout.
+Stderr is
+.BR "cron-ledger: interrupted by SIGINT" .
+Exit codes 0, 1, 2 and 3 are unchanged.
+.SH EXAMPLES
+The files
+.I examples/sample.crontab
+and
+.I examples/sample.log
+are invented.
+The crontab is one job at 04:15.
+The log is one syslog line for that job.
+Run this from the repository root.
+The exit status is 0.
+.PP
+.nf
+cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --syslog examples/sample.log --since 2026-10-20T00:00:00Z --until 2026-10-21T00:00:00Z --tz UTC
+.fi

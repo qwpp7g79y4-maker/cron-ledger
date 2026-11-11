@@ -1,0 +1,8 @@
+NEXT                        LEFT        LAST                        PASSED       UNIT            ACTIVATES
+Sun 2026-10-25 00:00:00 UTC 1 day left  Sat 2026-10-24 00:00:00 UTC 2h ago       logrotate.timer logrotate.service
+Sat 2026-10-24 12:00:00 UTC 14h left    Fri 2026-10-23 06:00:00 UTC 1 day 4h ago backup.timer    backup.service
+Mon 2026-10-26 00:00:00 UTC 2 days left n/a                         n/a          pending.timer   pending.service
+-                           -           -                           -            idle.timer      idle.service
+
+4 timers listed.
+Pass --all to see loaded but inactive timers, too.

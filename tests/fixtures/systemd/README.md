@@ -53,6 +53,16 @@ landing in between, confirmed by `zdump -v Europe/Amsterdam` separately
 expander; this systemd one does not need special gap/fold handling here
 because none of the three iterations lands on the transition day itself).
 
+`list-timers.txt` is a saved `systemctl list-timers --all` table (header,
+footer, and the `Pass --all` hint) with UTC timestamps chosen for the
+check, not a capture from a live `systemctl` on this machine. The parser
+reads LAST, NEXT and UNIT from it and does not run `systemctl`.
+`logrotate.timer`'s LAST is `2026-10-24T00:00:00Z` (next elapse is the
+window end, so the last run is `OK`). `backup.timer`'s LAST is
+`2026-10-23T06:00:00Z` and its NEXT `2026-10-24T12:00:00Z` is already due
+before `2026-10-25T00:00:00Z`, so that last run is `MISSED`. `pending.timer`
+and `idle.timer` have nothing to compare and are skipped with a warning.
+
 `persistent-backup.timer`'s `Persistent=true` "LATE (caught up)" behavior
 and `unsupported-trigger.timer`'s `OnBootSec=` handling are covered by
 unit tests in `src/systemd/timer_unit.rs` directly (no external tool to
