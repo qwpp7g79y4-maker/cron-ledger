@@ -1,16 +1,12 @@
 # cron-ledger
 
-English · [Nederlands](README.nl.md)
-
-A free, open-source, read-only Rust CLI that reads crontabs and systemd
-timers, computes when each job *should* have run in a time window, lines
-that up against syslog or the journal, and reports **OK**, **LATE**,
-**MISSED**, or **NO_TRACE**. It runs locally, makes no network
-connections, and writes nothing.
+A free, open-source, read-only Rust CLI that reports whether crontab and systemd-timer jobs actually ran: **OK**, **LATE**, **MISSED**, or **NO_TRACE**.
 
 [![crates.io](https://img.shields.io/crates/v/cron-ledger.svg)](https://crates.io/crates/cron-ledger) [![downloads](https://img.shields.io/crates/d/cron-ledger.svg)](https://crates.io/crates/cron-ledger) [![CI](https://github.com/qwpp7g79y4-maker/cron-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/qwpp7g79y4-maker/cron-ledger/actions/workflows/ci.yml) [![PEPAI checked](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fqwpp7g79y4-maker%2Fcron-ledger%2Fmain%2F.github%2Fbadge.json)](QUALITY.md) [![MSRV 1.85](https://img.shields.io/badge/MSRV-1.85-blue.svg)](Cargo.toml) [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-Version **1.0.0**. License: `MIT OR Apache-2.0`.
+`cron-ledger` reads crontabs and systemd timers, computes when each job *should* have run in a time window, and lines that up against syslog or the journal. It runs locally, makes no network connections, and writes nothing.
+
+English · [Nederlands](README.nl.md). Manual page: `man/cron-ledger.1`.
 
 ## Installation
 
@@ -18,6 +14,7 @@ Version 1.0.0 is on [crates.io](https://crates.io/crates/cron-ledger):
 
 ```sh
 cargo install cron-ledger
+cron-ledger --help
 ```
 
 Or build from a checkout of this repository:
@@ -29,7 +26,7 @@ cargo install --path .
 Both install the `cron-ledger` binary into `~/.cargo/bin` (or wherever
 `cargo install` normally places binaries on your system).
 
-## Aan de slag in 5 minuten
+## Quick start
 
 Install cron-ledger as in Installation and put it on your `PATH`. Run the
 commands below from the repository root. They read the invented crontab and
