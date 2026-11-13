@@ -1,0 +1,22 @@
+{
+  "name": "cron-ledger",
+  "displayName": "Cron Ledger",
+  "version": "0.1.1",
+  "description": "Audit crontab and systemd timer schedules against syslog or journal evidence. The CLI is read-only and does not change any schedule.",
+  "author": {
+    "name": "PEPAI",
+    "url": "https://github.com/qwpp7g79y4-maker"
+  },
+  "homepage": "https://github.com/qwpp7g79y4-maker/cron-ledger",
+  "repository": "https://github.com/qwpp7g79y4-maker/cron-ledger",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "cron",
+    "crontab",
+    "systemd",
+    "syslog",
+    "cli"
+  ],
+  "documentationUrl": "https://github.com/qwpp7g79y4-maker/cron-ledger",
+  "supportUrl": "https://github.com/qwpp7g79y4-maker/cron-ledger/issues"
+}
