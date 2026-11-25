@@ -1,5 +1,12 @@
 # Quality record, cron-ledger 1.0.0
 
+### 2026-11-25 (macOS constructor and dead code on Windows, no code change, fix stays `9a1d68a`, tip `92687f7`)
+
+- Checked `src/main.rs`: the constructor `RECORD` uses `__DATA,__mod_init_func` on macOS and `.init_array` on Linux, and sits in `mod early` under `cfg(any(target_os = "linux", target_os = "macos"))`. `STDOUT_WAS_CLOSED` and `stdout_is_closed` are read by `main` on every platform, so neither is dead code on Windows. `cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings` and `--target x86_64-apple-darwin`: clean, no `allow` needed. No gap shown by a failing test or by clippy, so no code change.
+- `cargo fmt --check`: clean. `cargo clippy --all-targets --locked -- -D warnings`: clean. `cargo test --locked`: 433 passed / 0 failed / 0 ignored. `cargo test --release --locked`: 431 passed / 0 failed / 0 ignored.
+- Running the macOS and Windows binaries: not run (only type-checked and linted for those targets from Linux). `cargo deny`: not run. `cargo audit`: not run. Fuzz: not run.
+- After `9a1d68a` only documents changed.
+
 ### 2026-11-25 (closed stdout, `--output` and special files, fix `9a1d68a`, on base `caae92f`)
 
 - Checked six reported gaps against the binary. Open and fixed: (1) standard output closed at the start (`>&-`) ended with the audit exit code and no message, because Rust reopens a closed descriptor 1 as `/dev/null` before `main`. It is now exit 2 with `standard output is closed`; a constructor records it before the runtime (Linux and macOS). `/dev/null` stays exit 0. (2) `--output` on a named pipe replaced the pipe with a regular file. It is now exit 2 (`cannot write report`) and the pipe is left alone. Red first: `tests/cli_e2e.rs::closed_stdout_at_the_start_is_exit_two_and_dev_null_stays_zero` and `output_does_not_replace_a_special_file` failed on `caae92f`, then passed.
