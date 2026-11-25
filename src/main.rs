@@ -62,6 +62,15 @@ fn write_report(path: Option<&std::path::Path>, text: &str) -> ReportWrite {
     let Some(path) = path else {
         return write_stdout(text);
     };
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        let kind = meta.file_type();
+        if !kind.is_file() && !kind.is_symlink() {
+            return ReportWrite::Failed(annotate_path(
+                path,
+                io::Error::other("not a regular file, it is not replaced"),
+            ));
+        }
+    }
     let tmp = temp_beside(path);
     let created = std::fs::File::create(&tmp).and_then(|mut file| {
         file.write_all(text.as_bytes())?;
@@ -205,6 +214,37 @@ fn git_object_name(text: &str) -> bool {
     matches!(text.len(), 40 | 64) && text.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// Whether file descriptor 1 was closed (`>&-`) when the process started.
+/// Rust's runtime reopens a closed descriptor 1 as `/dev/null` before `main`,
+/// where a closed stdout and a real `/dev/null` look the same, so the answer
+/// is taken by a constructor that runs before the runtime.
+static STDOUT_WAS_CLOSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod early {
+    use std::sync::atomic::Ordering;
+
+    unsafe extern "C" {
+        fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+    }
+    const F_GETFD: i32 = 1;
+
+    extern "C" fn record() {
+        // SAFETY: `F_GETFD` only reads the descriptor flags and takes no argument.
+        let closed = unsafe { fcntl(1, F_GETFD) } == -1;
+        super::STDOUT_WAS_CLOSED.store(closed, Ordering::Relaxed);
+    }
+
+    #[used]
+    #[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
+    #[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+    static RECORD: extern "C" fn() = record;
+}
+
+fn stdout_is_closed() -> bool {
+    STDOUT_WAS_CLOSED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 fn main() {
     signals::install();
     let mut raw_args: Vec<String> = Vec::new();
@@ -229,6 +269,10 @@ fn main() {
             fail_with(&e.to_string(), &trailer);
         }
     };
+
+    if parsed.output.is_none() && stdout_is_closed() {
+        fail("standard output is closed; open it or pass --output PATH");
+    }
 
     if parsed.version && !parsed.help {
         let text = version_text();

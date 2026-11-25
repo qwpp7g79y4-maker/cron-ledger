@@ -490,3 +490,75 @@ fn help_to_a_full_stdout_exits_two_instead_of_panicking() {
     assert!(stderr.contains("cannot write report"), "{stderr}");
     assert_no_panic(&stderr);
 }
+
+/// Standard output closed at the start (`>&-`) is exit 2 with a message,
+/// not a report that goes nowhere. Rust ignores EBADF on stdout, so without a
+/// check the run ends with its audit code. `/dev/null` is a real, open file
+/// and stays exit 0.
+#[cfg(unix)]
+#[test]
+fn closed_stdout_at_the_start_is_exit_two_and_dev_null_stays_zero() {
+    use assert_cmd::cargo::CommandCargoExt;
+
+    let bin = std::process::Command::cargo_bin("cron-ledger")
+        .expect("cron-ledger binary")
+        .get_program()
+        .to_owned();
+    let closed = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("exec \"$0\" --help >&-")
+        .arg(&bin)
+        .output()
+        .expect("spawn sh");
+    let stderr = String::from_utf8_lossy(&closed.stderr);
+    assert_eq!(closed.status.code(), Some(2), "{stderr}");
+    assert!(stderr.starts_with("cron-ledger: "), "{stderr}");
+    assert!(stderr.contains("standard output is closed"), "{stderr}");
+    assert_no_panic(&stderr);
+
+    let null = std::process::Command::new(&bin)
+        .arg("--help")
+        .stdout(
+            std::fs::File::options()
+                .write(true)
+                .open("/dev/null")
+                .unwrap(),
+        )
+        .output()
+        .expect("spawn cron-ledger");
+    assert_eq!(null.status.code(), Some(0), "{:?}", null.status);
+}
+
+/// `--output` writes a regular file. A named pipe at that path is not
+/// replaced by a regular file: exit 2, and the pipe is still a pipe.
+#[cfg(unix)]
+#[test]
+fn output_does_not_replace_a_special_file() {
+    use std::os::unix::fs::FileTypeExt;
+
+    let dir = temp_root().join("output-fifo");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("report.fifo");
+    let _ = std::fs::remove_file(&fifo);
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+    if !matches!(made, Ok(status) if status.success()) {
+        eprintln!("mkfifo unavailable; skipped");
+        return;
+    }
+    let assert = Command::cargo_bin("cron-ledger")
+        .unwrap()
+        .args(["--next", "2026-10-20T00:00:00Z", "--tz", "UTC", "--crontab"])
+        .arg(fixture("crontab/basic.crontab"))
+        .arg("--output")
+        .arg(&fifo)
+        .timeout(std::time::Duration::from_secs(10))
+        .assert();
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("cannot write report"), "{stderr}");
+    let kind = std::fs::symlink_metadata(&fifo).unwrap().file_type();
+    assert!(kind.is_fifo(), "the pipe was replaced: {kind:?}");
+    let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().collect();
+    assert_eq!(leftovers.len(), 1, "temp file left behind: {leftovers:?}");
+}
