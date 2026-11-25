@@ -41,6 +41,12 @@ cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --syslo
 The first command prints the report in `examples/sample.expected.txt`: one run,
 status OK, exit code 0. The second prints the same run as CSV.
 
+## Aan de slag in 5 minuten
+
+The five-minute path is the Quick start above: install, then run the two
+commands on the invented files in `examples/`. The first prints one run with
+status OK and exit code 0.
+
 ## Usage
 
 ```
@@ -322,6 +328,15 @@ release; CI does not run it.
 `cargo test --no-fail-fast` last measured 431 passed, 0 failed, 0 ignored
 (263 unit tests, 168 in the integration suites), on branch `prep/w24-fout`,
 on commit `de2b401` plus these changes.
+
+## Maintenance
+
+- Run `cargo test`, `cargo clippy --all-targets -- -D warnings` and
+  `cargo fmt --check` before a change; CI runs them (`.github/workflows/ci.yml`).
+- A change to behaviour goes with a test and a line in `CHANGELOG.md`.
+- The measured results are in `QUALITY.md`; what was not run is marked there as
+  not run.
+- Report security problems as described in `SECURITY.md`.
 
 ## Support
 

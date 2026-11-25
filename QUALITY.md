@@ -1,13 +1,16 @@
 # Quality record, cron-ledger 1.0.0
 
-Date: 2026-11-09. Branch: `prep/w24-fout`. Release-prep measurement of `cargo test --no-fail-fast` on commit `de2b401` plus these changes: 431 passed, 0 failed, 0 ignored. Every test-count line below uses that total. The 100 MiB timings and the line-coverage percentage stay the figures recorded in those sections; both are cited on commit `de2b401` plus these changes. No tag, no push, no publish.
-
 ### 2026-11-25 (closed stdout, `--output` and special files, fix `9a1d68a`, on base `caae92f`)
 
 - Checked six reported gaps against the binary. Open and fixed: (1) standard output closed at the start (`>&-`) ended with the audit exit code and no message, because Rust reopens a closed descriptor 1 as `/dev/null` before `main`. It is now exit 2 with `standard output is closed`; a constructor records it before the runtime (Linux and macOS). `/dev/null` stays exit 0. (2) `--output` on a named pipe replaced the pipe with a regular file. It is now exit 2 (`cannot write report`) and the pipe is left alone. Red first: `tests/cli_e2e.rs::closed_stdout_at_the_start_is_exit_two_and_dev_null_stays_zero` and `output_does_not_replace_a_special_file` failed on `caae92f`, then passed.
 - Not open: `--output` did not follow a planted symlink (the link is replaced, the target keeps its bytes). The unpacked crate passes its own `cargo test --locked` (137 files; `Cargo.toml` has `exclude`, no `include`, so every test input ships). `build.rs` reads the commit with `git rev-parse --verify HEAD`; reading `HEAD` as a file could only fail on a reftable repository, and git 2.34 here cannot make one, so no failing test exists and `build.rs` is unchanged. An existing regular file is still replaced, as the README documents.
 - `cargo test --locked`: 433 passed / 0 failed / 0 ignored. `cargo test --release --locked`: 431 passed / 0 failed / 0 ignored (two tests exist only in debug builds). `cargo fmt --check`: clean. `cargo clippy --all-targets --locked -- -D warnings`: clean.
 - `cargo deny`: not run. `cargo audit`: not run. Fuzz: not run. macOS and Windows: not run (Linux only).
+- After `9a1d68a` only documents changed: this record and `KEUR-NVT.md`, `README.md`, `README.nl.md`. No new measurement was made for those edits.
+
+### 2026-11-09 (release prep)
+
+Date: 2026-11-09. Branch: `prep/w24-fout`. Release-prep measurement of `cargo test --no-fail-fast` on commit `de2b401` plus these changes: 431 passed, 0 failed, 0 ignored. Every test-count line below uses that total. The 100 MiB timings and the line-coverage percentage stay the figures recorded in those sections; both are cited on commit `de2b401` plus these changes. No tag, no push, no publish.
 
 ### 2026-11-08 (W-54, next-run preview, branch prep/w24-fout)
 

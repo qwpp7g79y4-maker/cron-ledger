@@ -204,7 +204,7 @@ vergelijkt beide met hun opgeslagen uitvoer.
 | `REBOOT_ONLY` | Een `@reboot`-job: er worden geen verwachte tijden berekend, alleen de gevonden boots, ter informatie. |
 | `UNSUPPORTED_TRIGGER` | Een systemd-timer met alleen een monotone trigger (`OnBootSec=`, `OnUnitActiveSec=`, ...) waarvoor v1 geen verwachte tijden kan berekenen. |
 
-## Exitcodes
+## Afsluitcodes
 
 | Code | Betekenis |
 |---|---|
@@ -266,6 +266,16 @@ cargo package
 De eerste drie draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audit` en `cargo deny check`. Draai `cargo package` zelf voor een release; CI doet dit niet.
 
 `cargo test --no-fail-fast` gaf bij de laatste meting 431 geslaagd, 0 mislukt, 0 genegeerd (263 unittests, 168 in de integratiesuites), op tak `prep/w24-fout`, op commit `de2b401` plus deze wijzigingen.
+
+## Onderhoud
+
+- Draai `cargo test`, `cargo clippy --all-targets -- -D warnings` en
+  `cargo fmt --check` vóór een wijziging; CI draait ze
+  (`.github/workflows/ci.yml`).
+- Een gedragswijziging krijgt een test en een regel in `CHANGELOG.md`.
+- De gemeten resultaten staan in `QUALITY.md`; wat niet gedraaid is staat daar
+  als not run.
+- Meld beveiligingsproblemen zoals in `SECURITY.md` staat.
 
 ## Steunen
 
