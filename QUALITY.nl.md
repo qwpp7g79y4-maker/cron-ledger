@@ -7,6 +7,7 @@ Dit bestand volgt `QUALITY.md` en bevat alleen de vermelding hieronder.
 - `src/main.rs` gecontroleerd: de constructor `RECORD` gebruikt `__DATA,__mod_init_func` op macOS en `.init_array` op Linux, en staat in `mod early` onder `cfg(any(target_os = "linux", target_os = "macos"))`. `STDOUT_WAS_CLOSED` en `stdout_is_closed` worden op elk platform door `main` gelezen, dus geen van beide is dode code op Windows. `cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings` en `--target x86_64-apple-darwin`: schoon, geen `allow` nodig. Geen gat aangetoond met een falende test of met clippy, dus geen codewijziging.
 - `cargo fmt --check`: schoon. `cargo clippy --all-targets --locked -- -D warnings`: schoon. `cargo test --locked`: 433 geslaagd / 0 mislukt / 0 genegeerd. `cargo test --release --locked`: 431 geslaagd / 0 mislukt / 0 genegeerd.
 - De macOS- en Windows-binary draaien: not run (alleen vanaf Linux gecontroleerd en gelint voor die doelen). `cargo deny`: not run. `cargo audit`: not run. Fuzz: not run.
+- 2026-11-25, Rust 1.85 (de `rust-version`) op de code van `9a1d68a`, gemeten op tip `502ce35`: `cargo +1.85 fmt --check`: schoon. `cargo +1.85 clippy --all-targets --locked -- -D warnings`: schoon. `cargo +1.85 test --locked`: 433 geslaagd / 0 mislukt / 0 genegeerd. `cargo +1.85 test --release --locked`: not run. 1.85 op macOS en Windows: not run. Geen codewijziging.
 - Na `9a1d68a` zijn alleen documenten gewijzigd.
 
 ### 2026-11-25 (gesloten stdout, `--output` en speciale bestanden, fix `9a1d68a`, op basis `caae92f`)

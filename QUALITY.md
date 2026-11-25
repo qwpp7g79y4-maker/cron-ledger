@@ -5,6 +5,7 @@
 - Checked `src/main.rs`: the constructor `RECORD` uses `__DATA,__mod_init_func` on macOS and `.init_array` on Linux, and sits in `mod early` under `cfg(any(target_os = "linux", target_os = "macos"))`. `STDOUT_WAS_CLOSED` and `stdout_is_closed` are read by `main` on every platform, so neither is dead code on Windows. `cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings` and `--target x86_64-apple-darwin`: clean, no `allow` needed. No gap shown by a failing test or by clippy, so no code change.
 - `cargo fmt --check`: clean. `cargo clippy --all-targets --locked -- -D warnings`: clean. `cargo test --locked`: 433 passed / 0 failed / 0 ignored. `cargo test --release --locked`: 431 passed / 0 failed / 0 ignored.
 - Running the macOS and Windows binaries: not run (only type-checked and linted for those targets from Linux). `cargo deny`: not run. `cargo audit`: not run. Fuzz: not run.
+- 2026-11-25, Rust 1.85 (the `rust-version`) on the code of `9a1d68a`, checked at tip `502ce35`: `cargo +1.85 fmt --check`: clean. `cargo +1.85 clippy --all-targets --locked -- -D warnings`: clean. `cargo +1.85 test --locked`: 433 passed / 0 failed / 0 ignored. `cargo +1.85 test --release --locked`: not run. 1.85 on macOS and Windows: not run. No code change.
 - After `9a1d68a` only documents changed.
 
 ### 2026-11-25 (closed stdout, `--output` and special files, fix `9a1d68a`, on base `caae92f`)
