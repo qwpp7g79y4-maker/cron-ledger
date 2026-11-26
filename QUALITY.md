@@ -1,14 +1,8 @@
 # Quality record, cron-ledger 1.0.0
 
-pep: 7
+pep: 10
 
-## Open points that count
-
-| Point | Class | Deduction |
-|---|---|---|
-| No THIRD-PARTY-LICENSES.html page and no link to it | S | 3 |
-
-Score: 10 − 3 = 7. Other open points in this file have no class and do not count. They are not repaired yet.
+No open B, B-, M, M-, S or S-: 10 − 0 = 10. Other open points in this file have no class and do not count.
 
 ### 2026-11-25 (macOS constructor and dead code on Windows, no code change, fix stays `9a1d68a`, tip `92687f7`)
 
