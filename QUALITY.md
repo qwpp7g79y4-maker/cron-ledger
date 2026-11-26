@@ -1,6 +1,6 @@
 # Quality record, cron-ledger 1.0.0
 
-pep: 8.6
+pep: 10
 
 ### 2026-11-25 (macOS constructor and dead code on Windows, no code change, fix stays `9a1d68a`, tip `92687f7`)
 

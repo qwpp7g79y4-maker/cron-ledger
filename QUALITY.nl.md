@@ -1,6 +1,6 @@
 # Kwaliteitsverslag, cron-ledger 1.0.0 (Nederlands)
 
-pep: 8.6
+pep: 10
 
 Dit bestand volgt `QUALITY.md` en bevat alleen de vermelding hieronder.
 
