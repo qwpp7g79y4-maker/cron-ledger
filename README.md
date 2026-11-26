@@ -348,3 +348,5 @@ cron-ledger is free to use. If it saves you time, you can support the work via [
 
 Licensed under either of [MIT](LICENSE-MIT) or
 [Apache-2.0](LICENSE-APACHE) at your option.
+
+The licenses of the third-party crates built into the binary are listed in [THIRD-PARTY-LICENSES.html](THIRD-PARTY-LICENSES.html).

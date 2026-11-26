@@ -10,6 +10,8 @@ pep: 7
 
 Score: 10 − 3 = 7. Other open points in this file have no class and do not count. They are not repaired yet.
 
+Update 2026-11-26: THIRD-PARTY-LICENSES.html and the README link to it are added (branch fix/license-page). The score above stays as it was set and is not recalculated in this change.
+
 ### 2026-11-25 (macOS constructor and dead code on Windows, no code change, fix stays `9a1d68a`, tip `92687f7`)
 
 - Checked `src/main.rs`: the constructor `RECORD` uses `__DATA,__mod_init_func` on macOS and `.init_array` on Linux, and sits in `mod early` under `cfg(any(target_os = "linux", target_os = "macos"))`. `STDOUT_WAS_CLOSED` and `stdout_is_closed` are read by `main` on every platform, so neither is dead code on Windows. `cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings` and `--target x86_64-apple-darwin`: clean, no `allow` needed. No gap shown by a failing test or by clippy, so no code change.

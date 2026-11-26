@@ -10,6 +10,8 @@ pep: 7
 
 Cijfer: 10 − 3 = 7. Andere open punten in dit bestand hebben geen klasse en tellen niet mee. Ze zijn nog niet hersteld.
 
+Update 2026-11-26: THIRD-PARTY-LICENSES.html en de link ernaar in de README zijn toegevoegd (tak fix/license-page). Het cijfer hierboven blijft zoals het is gezet en wordt in deze wijziging niet opnieuw berekend.
+
 Dit bestand volgt `QUALITY.md` en bevat alleen de vermelding hieronder.
 
 ### 2026-11-25 (macOS-constructor en dode code op Windows, geen codewijziging, fix blijft `9a1d68a`, tip `92687f7`)

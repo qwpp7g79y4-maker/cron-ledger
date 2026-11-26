@@ -286,3 +286,5 @@ cron-ledger is gratis te gebruiken. Bespaart het je tijd, dan kun je het werk st
 ## Licentie
 
 Naar keuze onder [MIT](LICENSE-MIT) of [Apache-2.0](LICENSE-APACHE).
+
+De licenties van de externe crates in het programma staan in [THIRD-PARTY-LICENSES.html](THIRD-PARTY-LICENSES.html).
