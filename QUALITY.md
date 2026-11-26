@@ -102,7 +102,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 The boxes in `task.md` are still empty. C1 ticks those.
 
-1. Format. `task.md` of disk-full-doctor is at `/media/bitboi/DATA/projects/disk-full-doctor/task.md`. The cron-ledger brief now uses that checkbox form. The boxes stay empty.
+1. Format. `task.md` of disk-full-doctor is in the disk-full-doctor project folder. The cron-ledger brief now uses that checkbox form. The boxes stay empty.
 2. Sources. The Cronitor page `https://cronitor.io/guides/where-are-cron-logs-stored` was read again on 2026-11-02. It says cron logs cannot tell you which jobs did not run. The X posts behind the original concept were not verified. The README does not rely on them.
 3. Time crate. `jiff` 0.2.38. DST tests live in `src/schedule.rs`. No `chrono`.
 4. Exit code 3 for `NO_TRACE` only is the 0.2.0 contract. There is no `--fail-on` flag.

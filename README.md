@@ -41,7 +41,7 @@ cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --syslo
 The first command prints the report in `examples/sample.expected.txt`: one run,
 status OK, exit code 0. The second prints the same run as CSV.
 
-## Aan de slag in 5 minuten
+## Quickstart in 5 minutes
 
 The five-minute path is the Quick start above: install, then run the two
 commands on the invented files in `examples/`. The first prints one run with

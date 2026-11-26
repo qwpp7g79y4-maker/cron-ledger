@@ -10,7 +10,7 @@ repository = "https://github.com/qwpp7g79y4-maker/cron-ledger"
 readme = "README.md"
 keywords = ["cron", "crontab", "systemd", "syslog", "cli"]
 categories = ["command-line-utilities"]
-exclude = [".github/", ".gitattributes"]
+exclude = [".github/", ".gitattributes", "claude-plugin/"]
 
 [dependencies]
 jiff = { version = "0.2.38", features = ["serde"] }
