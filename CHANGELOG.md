@@ -3,8 +3,6 @@
 All notable changes to this project are documented in this file, in the
 style of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
-
 ## [1.0.0] - 2026-11-09
 
 The previous version is 0.2.0. This 1.0.0 is not tagged and not published.

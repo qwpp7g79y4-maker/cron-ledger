@@ -1,5 +1,7 @@
 # Quality record, cron-ledger 1.0.0
 
+pep: 8.6
+
 ### 2026-11-25 (macOS constructor and dead code on Windows, no code change, fix stays `9a1d68a`, tip `92687f7`)
 
 - Checked `src/main.rs`: the constructor `RECORD` uses `__DATA,__mod_init_func` on macOS and `.init_array` on Linux, and sits in `mod early` under `cfg(any(target_os = "linux", target_os = "macos"))`. `STDOUT_WAS_CLOSED` and `stdout_is_closed` are read by `main` on every platform, so neither is dead code on Windows. `cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings` and `--target x86_64-apple-darwin`: clean, no `allow` needed. No gap shown by a failing test or by clippy, so no code change.

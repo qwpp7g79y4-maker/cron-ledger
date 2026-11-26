@@ -1,5 +1,7 @@
 # Kwaliteitsverslag, cron-ledger 1.0.0 (Nederlands)
 
+pep: 8.6
+
 Dit bestand volgt `QUALITY.md` en bevat alleen de vermelding hieronder.
 
 ### 2026-11-25 (macOS-constructor en dode code op Windows, geen codewijziging, fix blijft `9a1d68a`, tip `92687f7`)

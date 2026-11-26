@@ -338,6 +338,8 @@ on commit `de2b401` plus these changes.
   not run.
 - Report security problems as described in `SECURITY.md`.
 
+After a release the tool is dormant: a new version appears only for a reported bug, a request, or a security problem. Security always comes first.
+
 ## Support
 
 cron-ledger is free to use. If it saves you time, you can support the work via [Ko-fi](https://ko-fi.com/pepai).
