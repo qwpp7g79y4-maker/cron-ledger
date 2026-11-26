@@ -1,5 +1,7 @@
 # Quality record, cron-ledger 1.0.0
 
+pep: 10
+
 ### 2026-11-25 (macOS constructor and dead code on Windows, no code change, fix stays `9a1d68a`, tip `92687f7`)
 
 - Checked `src/main.rs`: the constructor `RECORD` uses `__DATA,__mod_init_func` on macOS and `.init_array` on Linux, and sits in `mod early` under `cfg(any(target_os = "linux", target_os = "macos"))`. `STDOUT_WAS_CLOSED` and `stdout_is_closed` are read by `main` on every platform, so neither is dead code on Windows. `cargo clippy --all-targets --locked --target x86_64-pc-windows-gnu -- -D warnings` and `--target x86_64-apple-darwin`: clean, no `allow` needed. No gap shown by a failing test or by clippy, so no code change.
@@ -102,7 +104,7 @@ Toolchain: rustc 1.99.0 (b940084d7 2026-09-28), cargo 1.99.0 (5f94df478 2026-08-
 
 The boxes in `task.md` are still empty. C1 ticks those.
 
-1. Format. `task.md` of disk-full-doctor is at `/media/bitboi/DATA/projects/disk-full-doctor/task.md`. The cron-ledger brief now uses that checkbox form. The boxes stay empty.
+1. Format. `task.md` of disk-full-doctor is in the disk-full-doctor project folder. The cron-ledger brief now uses that checkbox form. The boxes stay empty.
 2. Sources. The Cronitor page `https://cronitor.io/guides/where-are-cron-logs-stored` was read again on 2026-11-02. It says cron logs cannot tell you which jobs did not run. The X posts behind the original concept were not verified. The README does not rely on them.
 3. Time crate. `jiff` 0.2.38. DST tests live in `src/schedule.rs`. No `chrono`.
 4. Exit code 3 for `NO_TRACE` only is the 0.2.0 contract. There is no `--fail-on` flag.

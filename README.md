@@ -41,7 +41,7 @@ cron-ledger --system-root /nonexistent --crontab examples/sample.crontab --syslo
 The first command prints the report in `examples/sample.expected.txt`: one run,
 status OK, exit code 0. The second prints the same run as CSV.
 
-## Aan de slag in 5 minuten
+## Quickstart in 5 minutes
 
 The five-minute path is the Quick start above: install, then run the two
 commands on the invented files in `examples/`. The first prints one run with
@@ -337,6 +337,8 @@ on commit `de2b401` plus these changes.
 - The measured results are in `QUALITY.md`; what was not run is marked there as
   not run.
 - Report security problems as described in `SECURITY.md`.
+
+After a release the tool is dormant: a new version appears only for a reported bug, a request, or a security problem. Security always comes first.
 
 ## Support
 

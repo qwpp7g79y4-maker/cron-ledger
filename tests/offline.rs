@@ -26,7 +26,7 @@ fn bin() -> &'static str {
 /// `examples/sample.expected.txt`.
 #[test]
 fn sample_audit_matches_expected_output_with_outgoing_connections_blocked() {
-    // GitHub CI / pepai-worker-01 often lack user namespaces (EPERM / uid_map).
+    // GitHub CI / some Linux test hosts often lack user namespaces (EPERM / uid_map).
     let probe = Command::new("unshare")
         .args(["-rn", "true"])
         .output()

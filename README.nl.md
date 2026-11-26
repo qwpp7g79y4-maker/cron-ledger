@@ -277,6 +277,8 @@ De eerste drie draaien in CI (`.github/workflows/ci.yml`), samen met `cargo audi
   als not run.
 - Meld beveiligingsproblemen zoals in `SECURITY.md` staat.
 
+Na een release staat de tool in sluimermodus (dormant): een nieuwe versie komt er alleen bij een gemelde bug, een verzoek of een beveiligingsprobleem. Beveiliging gaat altijd voor.
+
 ## Steunen
 
 cron-ledger is gratis te gebruiken. Bespaart het je tijd, dan kun je het werk steunen via [Ko-fi](https://ko-fi.com/pepai).
