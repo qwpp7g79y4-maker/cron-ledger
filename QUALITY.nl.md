@@ -1,6 +1,14 @@
 # Kwaliteitsverslag, cron-ledger 1.0.0 (Nederlands)
 
-pep: 10
+pep: 7
+
+## Open punten die meetellen
+
+| Punt | Klasse | Aftrek |
+|---|---|---|
+| Geen THIRD-PARTY-LICENSES.html-pagina en geen link ernaar | S | 3 |
+
+Cijfer: 10 − 3 = 7. Andere open punten in dit bestand hebben geen klasse en tellen niet mee. Ze zijn nog niet hersteld.
 
 Dit bestand volgt `QUALITY.md` en bevat alleen de vermelding hieronder.
 
